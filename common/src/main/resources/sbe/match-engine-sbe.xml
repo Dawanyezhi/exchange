@@ -4,8 +4,8 @@
                xsi:schemaLocation="http://fixprotocol.io/2016/SBE http://fixprotocol.io/2016/SBE"
                package="com.laser.exchange.common.codec"
                id="2"
-               version="1"
-               semanticVersion="1.1.0"
+               version="2"
+               semanticVersion="1.2.0"
                byteOrder="littleEndian">
     <types>
         <composite name="messageHeader" description="Standard SBE message header.">
@@ -67,6 +67,7 @@
             <validValue name="STP_CANCEL">4</validValue>
             <validValue name="IOC_NOT_FULLFILL_CANCEL_REMAINING">5</validValue>
             <validValue name="FOK_NOT_FULLFILL_CANCEL">6</validValue>
+            <validValue name="MARKET_NOT_FULLFILL_CANCEL_REMAINING">7</validValue>
         </enum>
 
         <!-- 宏观结果类型: 1 normal / 2 error -->
@@ -126,6 +127,10 @@
         <data name="delegatePrice" id="9" type="varStringEncoding"/>
         <data name="delegateCount" id="10" type="varStringEncoding"/>
         <data name="clientOid" id="11" type="varStringEncoding"/>
+        <data name="lockedQuoteAmount" id="12" type="varStringEncoding" sinceVersion="2"/>
+        <data name="targetQuoteAmount" id="13" type="varStringEncoding"/>
+        <data name="lockedBaseAmount" id="14" type="varStringEncoding"/>
+        <data name="marketTargetType" id="15" type="varStringEncoding"/>
     </message>
 
     <message name="AmendOrderCommand" id="101" description="改单指令">
@@ -168,6 +173,9 @@
         <data name="symbolId" id="5" type="varStringEncoding"/>
         <data name="delegatePrice" id="6" type="varStringEncoding"/>
         <data name="delegateCount" id="7" type="varStringEncoding"/>
+        <data name="lockedBaseAmount" id="8" type="varStringEncoding"/>
+        <data name="lockedQuoteAmount" id="9" type="varStringEncoding"/>
+        <data name="marketTargetType" id="10" type="varStringEncoding"/>
     </message>
 
     <!-- 撮合结果, resultBizType=MATCH -->
@@ -183,6 +191,10 @@
         <data name="tradeAmount" id="9" type="varStringEncoding"/>
         <data name="counterTradeAmount" id="10" type="varStringEncoding"/>
         <data name="remainingAmount" id="11" type="varStringEncoding"/>
+        <data name="tradeBaseQty" id="12" type="varStringEncoding"/>
+        <data name="tradeQuoteAmount" id="13" type="varStringEncoding"/>
+        <data name="remainingBaseQty" id="14" type="varStringEncoding"/>
+        <data name="remainingQuoteAmount" id="15" type="varStringEncoding"/>
     </message>
 
     <!-- 撤单结果, resultBizType=CANCEL -->
@@ -196,6 +208,9 @@
         <data name="delegatePrice" id="7" type="varStringEncoding"/>
         <data name="delegateCount" id="8" type="varStringEncoding"/>
         <data name="remainingAmount" id="9" type="varStringEncoding"/>
+        <data name="remainingBaseQty" id="10" type="varStringEncoding"/>
+        <data name="remainingQuoteAmount" id="11" type="varStringEncoding"/>
+        <data name="usedQuoteAmount" id="12" type="varStringEncoding"/>
     </message>
 
     <!-- 上币 / 下币结果, resultBizType=SYMBOL_UP|SYMBOL_DOWN

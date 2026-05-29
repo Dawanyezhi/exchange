@@ -27,10 +27,10 @@ public class OrderService {
         request.setSerialNum(serialNumGenerator.next());
         int length = request.encode(encodeBuffer, 0);
         boolean success = clusterClient.offer(encodeBuffer, 0, length);
-        log.info("placeOrder: serialNum={}, orderId={}, symbolCode={}, side={}, price={}, qty={}, offered={}",
+        log.info("placeOrder: serialNum={}, orderId={}, symbolCode={}, side={}, price={}, qty={}, lockedQuote={}, offered={}",
                 request.getSerialNum(), request.getOrderId(), request.getSymbolCode(),
                 request.getOrderSide(), request.getDelegatePrice(),
-                request.getDelegateCount(), success);
+                request.getDelegateCount(), request.getLockedQuoteAmount(), success);
         return success;
     }
 

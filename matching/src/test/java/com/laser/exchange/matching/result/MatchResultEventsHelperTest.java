@@ -1,6 +1,7 @@
 package com.laser.exchange.matching.result;
 
 import com.laser.exchange.common.enums.CancelReasonEnum;
+import com.laser.exchange.common.enums.MarketTargetTypeEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.OrderSideEnum;
 import com.laser.exchange.common.enums.OrderType;
@@ -125,7 +126,39 @@ class MatchResultEventsHelperTest {
         assertEquals(200L, result.getOppositeOrderId());
         assertEquals(new BigDecimal("49999"), result.getTradePrice());
         assertEquals(new BigDecimal("2"), result.getTradeAmount());
+        assertEquals(new BigDecimal("2"), result.getTradeBaseQty());
+        assertEquals(new BigDecimal("99998"), result.getTradeQuoteAmount());
         assertEquals(OrderStatusEnum.FULL_FILLED, result.getOrderStatus());
+    }
+
+    @Test
+    void appendMatchCarriesMarketQuoteRemainders() {
+        helper.beginRequest(6L, 1000L);
+
+        MatchOrder taker = MatchOrder.builder()
+                .orderId(101L)
+                .symbolId("BTC_USDT")
+                .orderType(OrderType.MARKET)
+                .orderSide(OrderSideEnum.BUY)
+                .timeInForce(TimeInForceEnum.GTC)
+                .delegatePrice(BigDecimal.ZERO)
+                .delegateCount(BigDecimal.ZERO)
+                .lockedQuoteAmount(new BigDecimal("100"))
+                .usedQuoteAmount(new BigDecimal("60"))
+                .marketTargetType(MarketTargetTypeEnum.QUOTE_AMOUNT)
+                .dealtCount(new BigDecimal("0.002"))
+                .orderStatus(OrderStatusEnum.PARTIALLY_FILLED)
+                .build();
+        MatchOrder maker = makeOrder(201L, "BTC_USDT", new BigDecimal("30000"), new BigDecimal("1"));
+
+        MatchOrderResult result = helper.appendMatch(taker, maker,
+                new BigDecimal("30000"), new BigDecimal("0.002"),
+                BigDecimal.ZERO, OrderStatusEnum.PARTIALLY_FILLED);
+
+        assertEquals(new BigDecimal("0.002"), result.getTradeBaseQty());
+        assertEquals(new BigDecimal("60.000"), result.getTradeQuoteAmount());
+        assertEquals(BigDecimal.ZERO, result.getRemainingBaseQty());
+        assertEquals(new BigDecimal("40"), result.getRemainingQuoteAmount());
     }
 
     @Test
@@ -139,6 +172,8 @@ class MatchResultEventsHelperTest {
         assertEquals(ResultBizTypeEnum.CANCEL, result.getResultBizType());
         assertEquals(OrderStatusEnum.CANCELLED, result.getOrderStatus());
         assertEquals(CancelReasonEnum.STP_CANCEL, result.getCancelReason());
+        assertEquals(new BigDecimal("5"), result.getRemainingBaseQty());
+        assertEquals(BigDecimal.ZERO, result.getRemainingQuoteAmount());
     }
 
     @Test

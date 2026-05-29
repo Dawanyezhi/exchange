@@ -1,6 +1,7 @@
 package com.laser.exchange.matching.result;
 
 import com.laser.exchange.common.enums.CancelReasonEnum;
+import com.laser.exchange.common.enums.MarketTargetTypeEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.ResultBizTypeEnum;
 import com.laser.exchange.common.enums.SymbolOpEnum;
@@ -106,6 +107,9 @@ public class MatchResultEventsHelper {
                 .orderStatus(OrderStatusEnum.NEW)
                 .delegatePrice(order.getDelegatePrice())
                 .delegateCount(order.getDelegateCount())
+                .lockedBaseAmount(order.getLockedBaseAmount())
+                .lockedQuoteAmount(order.getLockedQuoteAmount())
+                .marketTargetType(order.getEffectiveMarketTargetType())
                 .build();
         currentBatch.add(result);
         return result;
@@ -114,6 +118,7 @@ public class MatchResultEventsHelper {
     public MatchOrderResult appendMatch(MatchOrder taker, MatchOrder maker,
                                         BigDecimal tradePrice, BigDecimal tradeAmount,
                                         BigDecimal takerRemaining, OrderStatusEnum takerStatus) {
+        BigDecimal tradeQuoteAmount = tradePrice.multiply(tradeAmount);
         MatchOrderResult result = MatchOrderResult.builder()
                 .systemType(SystemTypeEnum.NORMAL)
                 .systemErrorCode(SystemErrorCodeEnum.NONE)
@@ -130,7 +135,11 @@ public class MatchResultEventsHelper {
                 .counterTradePrice(maker.getDelegatePrice())
                 .tradeAmount(tradeAmount)
                 .counterTradeAmount(tradeAmount) // 双边数量相等
-                .remainingAmount(takerRemaining)
+                .remainingAmount(resolveLegacyRemainingAmount(taker, takerRemaining))
+                .tradeBaseQty(tradeAmount)
+                .tradeQuoteAmount(tradeQuoteAmount)
+                .remainingBaseQty(resolveRemainingBaseQty(taker))
+                .remainingQuoteAmount(resolveRemainingQuoteAmount(taker))
                 .build();
         currentBatch.add(result);
         return result;
@@ -151,7 +160,10 @@ public class MatchResultEventsHelper {
                 .cancelReason(reason)
                 .delegatePrice(order.getDelegatePrice())
                 .delegateCount(order.getDelegateCount())
-                .remainingAmount(order.getRemainingQuantity())
+                .remainingAmount(resolveRemainingBaseQty(order))
+                .remainingBaseQty(resolveRemainingBaseQty(order))
+                .remainingQuoteAmount(resolveRemainingQuoteAmount(order))
+                .usedQuoteAmount(order.getUsedQuoteAmount())
                 .build();
         currentBatch.add(result);
         return result;
@@ -215,9 +227,45 @@ public class MatchResultEventsHelper {
                 .orderStatus(OrderStatusEnum.REJECTED)
                 .delegatePrice(BigDecimal.ZERO)
                 .delegateCount(BigDecimal.ZERO)
+                .lockedBaseAmount(BigDecimal.ZERO)
+                .lockedQuoteAmount(BigDecimal.ZERO)
+                .marketTargetType(MarketTargetTypeEnum.BASE_QTY)
                 .build();
         currentBatch.add(result);
         return result;
+    }
+
+    private BigDecimal resolveRemainingBaseQty(MatchOrder order) {
+        if (order == null) {
+            return BigDecimal.ZERO;
+        }
+        if (order.isMarketTargetQuoteAmount() && order.isBuy()) {
+            return BigDecimal.ZERO;
+        }
+        if (order.isMarketTargetQuoteAmount() && order.isSell()) {
+            return order.getRemainingBaseBudget();
+        }
+        return order.getRemainingQuantity();
+    }
+
+    private BigDecimal resolveLegacyRemainingAmount(MatchOrder order, BigDecimal takerRemaining) {
+        if (order != null && order.isMarketTargetQuoteAmount()) {
+            return resolveRemainingBaseQty(order);
+        }
+        return takerRemaining != null ? takerRemaining : BigDecimal.ZERO;
+    }
+
+    private BigDecimal resolveRemainingQuoteAmount(MatchOrder order) {
+        if (order == null || !order.isMarket()) {
+            return BigDecimal.ZERO;
+        }
+        if (order.isBuy()) {
+            return order.getRemainingQuoteBudget();
+        }
+        if (order.isMarketTargetQuoteAmount()) {
+            return order.getRemainingQuoteTarget();
+        }
+        return BigDecimal.ZERO;
     }
 
     private long allocSerialNum() {

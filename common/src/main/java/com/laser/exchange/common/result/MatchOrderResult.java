@@ -42,6 +42,10 @@ public class MatchOrderResult extends MatchResult {
     private BigDecimal tradeAmount;
     private BigDecimal counterTradeAmount;
     private BigDecimal remainingAmount;
+    private BigDecimal tradeBaseQty;
+    private BigDecimal tradeQuoteAmount;
+    private BigDecimal remainingBaseQty;
+    private BigDecimal remainingQuoteAmount;
 
     @Override
     public int encode(MutableDirectBuffer buffer, int offset) {
@@ -69,6 +73,10 @@ public class MatchOrderResult extends MatchResult {
         enc.tradeAmount(BigDecimalUtil.defaultToString(tradeAmount));
         enc.counterTradeAmount(BigDecimalUtil.defaultToString(counterTradeAmount));
         enc.remainingAmount(BigDecimalUtil.defaultToString(remainingAmount));
+        enc.tradeBaseQty(BigDecimalUtil.defaultToString(tradeBaseQty));
+        enc.tradeQuoteAmount(BigDecimalUtil.defaultToString(tradeQuoteAmount));
+        enc.remainingBaseQty(BigDecimalUtil.defaultToString(remainingBaseQty));
+        enc.remainingQuoteAmount(BigDecimalUtil.defaultToString(remainingQuoteAmount));
 
         return MessageHeaderEncoder.ENCODED_LENGTH + enc.encodedLength();
     }
@@ -95,6 +103,10 @@ public class MatchOrderResult extends MatchResult {
         this.tradeAmount = BigDecimalUtil.stringToBigDecimal(dec.tradeAmount());
         this.counterTradeAmount = BigDecimalUtil.stringToBigDecimal(dec.counterTradeAmount());
         this.remainingAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingAmount());
+        this.tradeBaseQty = BigDecimalUtil.stringToBigDecimal(dec.tradeBaseQty());
+        this.tradeQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.tradeQuoteAmount());
+        this.remainingBaseQty = BigDecimalUtil.stringToBigDecimal(dec.remainingBaseQty());
+        this.remainingQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingQuoteAmount());
         return this;
     }
 }

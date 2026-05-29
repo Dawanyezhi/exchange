@@ -1,6 +1,7 @@
 package com.laser.exchange.matching.core.engine;
 
 import com.laser.exchange.common.config.SymbolConfig;
+import com.laser.exchange.common.enums.CancelReasonEnum;
 import com.laser.exchange.common.enums.OrderSideEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.OrderType;
@@ -8,6 +9,7 @@ import com.laser.exchange.common.enums.ResultBizTypeEnum;
 import com.laser.exchange.common.enums.StpStrategyEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
 import com.laser.exchange.common.result.MatchResult;
+import com.laser.exchange.common.result.CancelOrderResult;
 import com.laser.exchange.matching.core.model.MatchConfig;
 import com.laser.exchange.matching.core.model.MatchEngineState;
 import com.laser.exchange.matching.core.model.MatchOrder;
@@ -67,6 +69,27 @@ class MatchEventOrderTest {
                 .timeInForce(tif)
                 .delegatePrice(price)
                 .delegateCount(qty)
+                .dealtCount(BigDecimal.ZERO)
+                .orderStatus(OrderStatusEnum.NEW)
+                .stpStrategyEnum(StpStrategyEnum.DEFAULT)
+                .stpAccountId(1000L + id)
+                .createTime(id)
+                .updateTime(id)
+                .build();
+    }
+
+    private MatchOrder market(long id, OrderSideEnum side, BigDecimal qty, BigDecimal lockedQuoteAmount) {
+        return MatchOrder.builder()
+                .orderId(id)
+                .symbolId("BTC_USDT")
+                .accountId(1000L + id)
+                .orderType(OrderType.MARKET)
+                .orderSide(side)
+                .timeInForce(TimeInForceEnum.GTC)
+                .delegatePrice(BigDecimal.ZERO)
+                .delegateCount(qty)
+                .lockedQuoteAmount(lockedQuoteAmount)
+                .usedQuoteAmount(BigDecimal.ZERO)
                 .dealtCount(BigDecimal.ZERO)
                 .orderStatus(OrderStatusEnum.NEW)
                 .stpStrategyEnum(StpStrategyEnum.DEFAULT)
@@ -183,6 +206,25 @@ class MatchEventOrderTest {
         assertEquals(ResultBizTypeEnum.PLACE_ORDER, events.get(0).getResultBizType());
         assertEquals(ResultBizTypeEnum.MATCH, events.get(1).getResultBizType());
         assertEquals(ResultBizTypeEnum.CANCEL, events.get(2).getResultBizType());
+    }
+
+    @Test
+    @DisplayName("市价单部分成交 → 顺序: PLACE → MATCH → CANCEL(MARKET_NOT_FULLFILL)")
+    void marketPartialFill_emitsPlaceMatchCancel() {
+        helper.beginRequest(1L, 100L);
+        engine.placeOrder(limit(1, OrderSideEnum.SELL, new BigDecimal("100"), BigDecimal.ONE, TimeInForceEnum.GTC));
+        helper.endRequest();
+
+        helper.beginRequest(2L, 200L);
+        engine.placeOrder(market(2, OrderSideEnum.BUY, new BigDecimal("3"), new BigDecimal("1000")));
+        List<MatchResult> events = helper.endRequest();
+
+        assertEquals(3, events.size());
+        assertEquals(ResultBizTypeEnum.PLACE_ORDER, events.get(0).getResultBizType());
+        assertEquals(ResultBizTypeEnum.MATCH, events.get(1).getResultBizType());
+        assertEquals(ResultBizTypeEnum.CANCEL, events.get(2).getResultBizType());
+        assertEquals(CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING,
+                ((CancelOrderResult) events.get(2)).getCancelReason());
     }
 
     @Test

@@ -60,6 +60,7 @@ public class SymbolService {
             MatchConfig mc = new MatchConfig();
             mc.setSymbol(symbolName);
             mc.setEnabled(false);
+            mc.setMarketOrderProtectionBps(matchEngine.getDefaultMarketOrderProtectionBps());
             state.addMatchConfig(mc);
 
             log.info("[SymbolService] LIST symbol: code={}, name={}, base={}, quote={} (default disabled)",
@@ -119,6 +120,7 @@ public class SymbolService {
         if (mc == null) {
             mc = new MatchConfig();
             mc.setSymbol(name);
+            mc.setMarketOrderProtectionBps(matchEngine.getDefaultMarketOrderProtectionBps());
             state.addMatchConfig(mc);
         }
         mc.setEnabled(switchOn);

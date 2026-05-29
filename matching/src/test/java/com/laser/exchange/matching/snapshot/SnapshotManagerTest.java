@@ -123,6 +123,7 @@ class SnapshotManagerTest {
     @DisplayName("单 symbol + 含部分成交订单 → 恢复后字段精确一致")
     void singleSymbolFidelity() {
         setupOneSymbolWithBook();
+        state.getMatchConfig("BTC_USDT").setMarketOrderProtectionBps(250L);
 
         manager.takeSnapshot(state, 50L, 200L, 1700000000000L, buffer);
 
@@ -139,6 +140,7 @@ class SnapshotManagerTest {
         assertEquals("BTC_USDT", cfgR.getSymbolName());
         assertEquals(1, cfgR.getBaseCoinId());
         assertEquals(2, cfgR.getQuoteCoinId());
+        assertEquals(250L, restored.getMatchConfig("BTC_USDT").getMarketOrderProtectionBps());
 
         // 订单簿存在
         OrderBook bookR = restored.getMatchContext().getOrderBook("BTC_USDT");
@@ -154,6 +156,43 @@ class SnapshotManagerTest {
         assertEquals(new BigDecimal("0.5"), o103.getDealtCount());
         assertEquals(OrderStatusEnum.PARTIALLY_FILLED, o103.getOrderStatus());
         assertEquals(new BigDecimal("100"), o103.getDelegatePrice());
+    }
+
+    @Test
+    @DisplayName("市价队列不会进入快照恢复状态")
+    void marketQueuesAreNotSnapshotted() {
+        SymbolConfig cfg = symbolConfig(1, "BTC_USDT", 1, 2);
+        state.getMatchContext().addSymbol(1, cfg);
+        MatchConfig mc = new MatchConfig();
+        mc.setSymbol("BTC_USDT");
+        mc.setEnabled(true);
+        state.addMatchConfig(mc);
+
+        OrderBook book = new OrderBook("BTC_USDT");
+        MatchOrder marketOrder = MatchOrder.builder()
+                .orderId(999L)
+                .symbolId("BTC_USDT")
+                .orderType(OrderType.MARKET)
+                .orderSide(OrderSideEnum.BUY)
+                .timeInForce(TimeInForceEnum.GTC)
+                .delegateCount(BigDecimal.ONE)
+                .dealtCount(BigDecimal.ZERO)
+                .orderStatus(OrderStatusEnum.NEW)
+                .build();
+        book.addOrder(marketOrder);
+        state.getMatchContext().addOrderBook(book);
+
+        manager.takeSnapshot(state, 0L, 0L, 1L, buffer);
+
+        MatchEngineState restored = new MatchEngineState();
+        manager.loadSnapshot(restored, new SerialNumValidator(true),
+                new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer);
+
+        OrderBook restoredBook = restored.getMatchContext().getOrderBook("BTC_USDT");
+        assertNotNull(restoredBook);
+        assertTrue(restoredBook.getBuyMarketOrderQueue().isEmpty());
+        assertTrue(restoredBook.getSellMarketOrderQueue().isEmpty());
+        assertNull(restoredBook.getOrder(999L));
     }
 
     @Test

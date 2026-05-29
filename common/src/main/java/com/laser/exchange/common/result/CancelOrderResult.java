@@ -39,6 +39,9 @@ public class CancelOrderResult extends MatchResult {
     private BigDecimal delegatePrice;
     private BigDecimal delegateCount;
     private BigDecimal remainingAmount;
+    private BigDecimal remainingBaseQty;
+    private BigDecimal remainingQuoteAmount;
+    private BigDecimal usedQuoteAmount;
 
     @Override
     public int encode(MutableDirectBuffer buffer, int offset) {
@@ -66,6 +69,9 @@ public class CancelOrderResult extends MatchResult {
         enc.delegatePrice(BigDecimalUtil.defaultToString(delegatePrice));
         enc.delegateCount(BigDecimalUtil.defaultToString(delegateCount));
         enc.remainingAmount(BigDecimalUtil.defaultToString(remainingAmount));
+        enc.remainingBaseQty(BigDecimalUtil.defaultToString(remainingBaseQty));
+        enc.remainingQuoteAmount(BigDecimalUtil.defaultToString(remainingQuoteAmount));
+        enc.usedQuoteAmount(BigDecimalUtil.defaultToString(usedQuoteAmount));
 
         return MessageHeaderEncoder.ENCODED_LENGTH + enc.encodedLength();
     }
@@ -94,6 +100,9 @@ public class CancelOrderResult extends MatchResult {
         this.delegatePrice = BigDecimalUtil.stringToBigDecimal(dec.delegatePrice());
         this.delegateCount = BigDecimalUtil.stringToBigDecimal(dec.delegateCount());
         this.remainingAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingAmount());
+        this.remainingBaseQty = BigDecimalUtil.stringToBigDecimal(dec.remainingBaseQty());
+        this.remainingQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingQuoteAmount());
+        this.usedQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.usedQuoteAmount());
         return this;
     }
 }

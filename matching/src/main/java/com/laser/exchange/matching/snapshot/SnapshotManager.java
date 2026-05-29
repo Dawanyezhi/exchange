@@ -35,6 +35,7 @@ import com.laser.exchange.matching.core.model.OrderBook;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
 import com.laser.exchange.matching.resultRepoModule.ResultRepository;
 import com.laser.exchange.common.utils.BigDecimalUtil;
+import com.laser.exchange.matching.config.MarketOrderConfig;
 import com.laser.exchange.matching.validation.SerialNumValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.ExpandableArrayBuffer;
@@ -80,6 +81,15 @@ public class SnapshotManager {
 
     /** ExpandableArrayBuffer 可动态扩容，单笔 write 不会超 MTU 但仍保留安全余量 */
     private final MutableDirectBuffer encodeBuffer = new ExpandableArrayBuffer(8 * 1024);
+    private final long defaultMarketOrderProtectionBps;
+
+    public SnapshotManager() {
+        this(MarketOrderConfig.DEFAULT_PROTECTION_BPS);
+    }
+
+    public SnapshotManager(long defaultMarketOrderProtectionBps) {
+        this.defaultMarketOrderProtectionBps = MarketOrderConfig.normalizeProtectionBps(defaultMarketOrderProtectionBps);
+    }
 
     // ============ TAKE ============
 
@@ -112,7 +122,10 @@ public class SnapshotManager {
             SymbolConfig cfg = e.getValue();
             MatchConfig matchCfg = state.getMatchConfig(cfg.getSymbolName());
             boolean enabled = matchCfg != null && matchCfg.isEnabled();
-            entryCount += writeSymbolConfig(writer, checksum, e.getKey(), cfg, enabled);
+            long protectionBps = matchCfg != null
+                    ? MarketOrderConfig.normalizeProtectionBps(matchCfg.getMarketOrderProtectionBps())
+                    : defaultMarketOrderProtectionBps;
+            entryCount += writeSymbolConfig(writer, checksum, e.getKey(), cfg, enabled, protectionBps);
         }
 
         // 3. OrderBook + MatchOrders 订单簿订单
@@ -162,13 +175,6 @@ public class SnapshotManager {
             out.addAll(collectDepthLine(line));
         }
 
-        // 市价队列：买 + 卖
-        for (MatchOrder o : book.getBuyMarketOrderQueue()) {
-            out.add(o);
-        }
-        for (MatchOrder o : book.getSellMarketOrderQueue()) {
-            out.add(o);
-        }
         return out;
     }
 
@@ -194,7 +200,8 @@ public class SnapshotManager {
         return 1;
     }
 
-    private int writeSymbolConfig(SnapshotWriter writer, SnapshotChecksum checksum, int symbolCode, SymbolConfig cfg, boolean enabled) {
+    private int writeSymbolConfig(SnapshotWriter writer, SnapshotChecksum checksum, int symbolCode,
+                                  SymbolConfig cfg, boolean enabled, long protectionBps) {
         SymbolConfigEntryEncoder enc = new SymbolConfigEntryEncoder();
         MessageHeaderEncoder h = new MessageHeaderEncoder();
         enc.wrapAndApplyHeader(encodeBuffer, 0, h);
@@ -202,6 +209,7 @@ public class SnapshotManager {
             enc.baseCoinId(cfg.getBaseCoinId());
             enc.quoteCoinId(cfg.getQuoteCoinId());
         enc.enabled(enabled ? BooleanType.TRUE : BooleanType.FALSE);
+        enc.marketOrderProtectionBps(protectionBps);
         enc.symbolName(cfg.getSymbolName() != null ? cfg.getSymbolName() : "");
         writeChecksummed(writer, checksum, MessageHeaderEncoder.ENCODED_LENGTH + enc.encodedLength());
         return 1;
@@ -328,6 +336,10 @@ public class SnapshotManager {
                     MatchConfig mc = new MatchConfig();
                     mc.setSymbol(name);
                     mc.setEnabled(dec.enabled().value() == 1);
+                    long protectionBps = dec.actingVersion() >= 1
+                            ? dec.marketOrderProtectionBps()
+                            : defaultMarketOrderProtectionBps;
+                    mc.setMarketOrderProtectionBps(MarketOrderConfig.normalizeProtectionBps(protectionBps));
                     state.addMatchConfig(mc);
                 }
                 case OrderBookStartDecoder.TEMPLATE_ID -> {

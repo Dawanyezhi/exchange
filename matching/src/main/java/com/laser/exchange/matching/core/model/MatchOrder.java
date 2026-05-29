@@ -63,8 +63,43 @@ public class MatchOrder {
 
     /**
      * 委托数量
+     *
+     * <p>限价单和按 base 数量的市价单表示目标 base 数量。
+     * 按 quote 金额的市价单可以为 0，实际目标金额使用 targetQuoteAmount。
      */
     private BigDecimal delegateCount;
+
+    /**
+     * 目标计价币金额。
+     *
+     * <p>BUY 市价单表示最多花多少 quote，SELL 市价单表示目标获得多少 quote。
+     */
+    private BigDecimal targetQuoteAmount;
+
+    /**
+     * 锁定计价币金额，买市价单进入撮合时的预算上限。
+     */
+    private BigDecimal lockedQuoteAmount;
+
+    /**
+     * 锁定基础币金额，卖市价单进入撮合时的预算上限。
+     */
+    private BigDecimal lockedBaseAmount;
+
+    /**
+     * 市价单目标单位。限价单默认为 BASE_QTY。
+     */
+    private MarketTargetTypeEnum marketTargetType;
+
+    /**
+     * 已消耗计价币金额，仅买市价单撮合过程中维护。
+     */
+    private BigDecimal usedQuoteAmount;
+
+    /**
+     * 已获得计价币金额，仅按 quote 金额卖出的市价单撮合过程中维护。
+     */
+    private BigDecimal receivedQuoteAmount;
 
     /**
      * 成交数量
@@ -116,6 +151,22 @@ public class MatchOrder {
         return this.orderSide == OrderSideEnum.BUY;
     }
 
+    public boolean isSell() {
+        return this.orderSide == OrderSideEnum.SELL;
+    }
+
+    public MarketTargetTypeEnum getEffectiveMarketTargetType() {
+        return this.marketTargetType != null ? this.marketTargetType : MarketTargetTypeEnum.BASE_QTY;
+    }
+
+    public boolean isMarketTargetQuoteAmount() {
+        return isMarket() && getEffectiveMarketTargetType() == MarketTargetTypeEnum.QUOTE_AMOUNT;
+    }
+
+    public boolean isMarketTargetBaseQty() {
+        return isMarket() && getEffectiveMarketTargetType() == MarketTargetTypeEnum.BASE_QTY;
+    }
+
     /**
      * @return
      */
@@ -138,7 +189,30 @@ public class MatchOrder {
      * @return
      */
     public BigDecimal getRemainingQuantity() {
-        return BigDecimalUtil.subtract(this.delegateCount, this.dealtCount);
+        BigDecimal targetBaseQty = this.delegateCount != null ? this.delegateCount : BigDecimal.ZERO;
+        BigDecimal filledBaseQty = this.dealtCount != null ? this.dealtCount : BigDecimal.ZERO;
+        return BigDecimalUtil.subtract(targetBaseQty, filledBaseQty);
+    }
+
+    public BigDecimal getRemainingQuoteBudget() {
+        BigDecimal locked = this.lockedQuoteAmount != null ? this.lockedQuoteAmount : BigDecimal.ZERO;
+        BigDecimal used = this.usedQuoteAmount != null ? this.usedQuoteAmount : BigDecimal.ZERO;
+        BigDecimal remaining = locked.subtract(used);
+        return remaining.signum() > 0 ? remaining : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getRemainingBaseBudget() {
+        BigDecimal locked = this.lockedBaseAmount != null ? this.lockedBaseAmount : BigDecimal.ZERO;
+        BigDecimal used = this.dealtCount != null ? this.dealtCount : BigDecimal.ZERO;
+        BigDecimal remaining = locked.subtract(used);
+        return remaining.signum() > 0 ? remaining : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getRemainingQuoteTarget() {
+        BigDecimal target = this.targetQuoteAmount != null ? this.targetQuoteAmount : BigDecimal.ZERO;
+        BigDecimal received = this.receivedQuoteAmount != null ? this.receivedQuoteAmount : BigDecimal.ZERO;
+        BigDecimal remaining = target.subtract(received);
+        return remaining.signum() > 0 ? remaining : BigDecimal.ZERO;
     }
 
     public void updateFilledQuantity(BigDecimal matchedQty) {
@@ -168,6 +242,12 @@ public class MatchOrder {
      * @return
      */
     public boolean fullFilled() {
+        if (isMarketTargetQuoteAmount()) {
+            if (isBuy()) {
+                return !BigDecimalUtil.greaterThanZero(getRemainingQuoteBudget());
+            }
+            return !BigDecimalUtil.greaterThanZero(getRemainingQuoteTarget());
+        }
         return BigDecimalUtil.greaterOrEquals(this.dealtCount, this.delegateCount);
     }
 
@@ -193,6 +273,12 @@ public class MatchOrder {
         copy.timeInForce = this.timeInForce;
         copy.delegatePrice = this.delegatePrice;
         copy.delegateCount = this.delegateCount;
+        copy.targetQuoteAmount = this.targetQuoteAmount;
+        copy.lockedQuoteAmount = this.lockedQuoteAmount;
+        copy.lockedBaseAmount = this.lockedBaseAmount;
+        copy.marketTargetType = this.marketTargetType;
+        copy.usedQuoteAmount = this.usedQuoteAmount;
+        copy.receivedQuoteAmount = this.receivedQuoteAmount;
         copy.dealtCount = this.dealtCount;
         copy.orderStatus = this.orderStatus;
         copy.createTime = this.createTime;
@@ -226,6 +312,12 @@ public class MatchOrder {
         this.setTimeInForce(placeOrderRequest.getTimeInForce());
         this.setDelegatePrice(placeOrderRequest.getDelegatePrice());
         this.setDelegateCount(placeOrderRequest.getDelegateCount());
+        this.setTargetQuoteAmount(placeOrderRequest.getTargetQuoteAmount());
+        this.setLockedQuoteAmount(placeOrderRequest.getLockedQuoteAmount());
+        this.setLockedBaseAmount(placeOrderRequest.getLockedBaseAmount());
+        this.setMarketTargetType(placeOrderRequest.getMarketTargetType());
+        this.setUsedQuoteAmount(BigDecimal.ZERO);
+        this.setReceivedQuoteAmount(BigDecimal.ZERO);
         this.setDealtCount(BigDecimal.ZERO);
         this.setOrderStatus(OrderStatusEnum.NEW);
         this.setCancelReason(CancelReasonEnum.NONE);

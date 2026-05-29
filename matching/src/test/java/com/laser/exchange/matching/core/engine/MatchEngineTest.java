@@ -191,6 +191,7 @@ class MatchEngineTest {
         MatchConfig matchConfig = new MatchConfig();
         matchConfig.setEnabled(true);
         matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(5000);
 
         // 添加币对配置 确保开启币对交易
         MatchEngine matchEngine = new MatchEngine();
@@ -1386,15 +1387,17 @@ class MatchEngineTest {
         // 下市价单
         MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
                 TimeInForceEnum.GTC, null, new BigDecimal("0.5"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("25000"));
         matchEngine.placeOrder(buyMarket);
 
         Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("25000.0"), buyMarket.getUsedQuoteAmount());
         matchEngine.getMatchEngineState().getMatchContext().getOrderBook(symbol).printOrderBook(SCENE);
     }
 
     @Test
-    @DisplayName("第二个市价单不撮合")
-    void testMarketMatchNotInstantly() {
+    @DisplayName("市价单未完全成交时立即撤销剩余")
+    void testMarketPartialFillCancelRemaining() {
         String symbol = "SPOT_BTC_USDT";
 
         MatchConfig matchConfig = new MatchConfig();
@@ -1414,16 +1417,242 @@ class MatchEngineTest {
         // 下市价单
         MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
                 TimeInForceEnum.GTC, null, new BigDecimal("1.5"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("100000"));
         matchEngine.placeOrder(buyMarket);
 
-        MatchOrder buyMarket1 = buildMarketOrder(1003L, symbol, OrderSideEnum.BUY,
-                TimeInForceEnum.GTC, null, new BigDecimal("0.5"));
-        matchEngine.placeOrder(buyMarket1);
-
-        Assertions.assertEquals(OrderStatusEnum.PARTIALLY_FILLED, buyMarket.getOrderStatus());
-        Assertions.assertEquals(OrderStatusEnum.NEW, buyMarket1.getOrderStatus());
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING, buyMarket.getCancelReason());
+        Assertions.assertEquals(new BigDecimal("1"), buyMarket.getDealtCount());
+        Assertions.assertTrue(matchEngine.getMatchEngineState().getMatchContext()
+                .getOrderBook(symbol).getBuyMarketOrderQueue().isEmpty());
 
         matchEngine.getMatchEngineState().getMatchContext().getOrderBook(symbol).printOrderBook(SCENE);
+    }
+
+    @Test
+    @DisplayName("买市价单预算不足时允许最后一笔按剩余预算部分成交")
+    void testMarketBuyBudgetPartialFillThenCancel() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(5000);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder sellOrder = buildLimitOrder(1001L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("50000"), new BigDecimal("1"));
+        matchEngine.placeOrder(sellOrder);
+
+        MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, null, new BigDecimal("1"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("25000"));
+
+        matchEngine.placeOrder(buyMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("0.5000000000000000"), buyMarket.getDealtCount());
+        Assertions.assertEquals(new BigDecimal("25000.0000000000000000"), buyMarket.getUsedQuoteAmount());
+        Assertions.assertEquals(OrderStatusEnum.PARTIALLY_FILLED, sellOrder.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("0.5000000000000000"), sellOrder.getRemainingQuantity());
+    }
+
+    @Test
+    @DisplayName("买市价单遇到超过保护价档位时停止并撤销剩余")
+    void testMarketBuyStopsAtProtectionPrice() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(500);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder sell1 = buildLimitOrder(1001L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("100"), new BigDecimal("1"));
+        MatchOrder sell2 = buildLimitOrder(1002L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("106"), new BigDecimal("1"));
+        matchEngine.placeOrder(sell1);
+        matchEngine.placeOrder(sell2);
+
+        MatchOrder buyMarket = buildMarketOrder(1003L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, null, new BigDecimal("2"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("1000"));
+
+        matchEngine.placeOrder(buyMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("1"), buyMarket.getDealtCount());
+        Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, sell1.getOrderStatus());
+        Assertions.assertEquals(OrderStatusEnum.NEW, sell2.getOrderStatus());
+        Assertions.assertNotNull(engineState.getMatchContext().getOrderBook(symbol).getOrder(1002L));
+    }
+
+    @Test
+    @DisplayName("买市价单预算可成交数量低于最小成交数量时防尘撤销")
+    void testMarketBuyDustStopsBeforeTrade() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder sellOrder = buildLimitOrder(1001L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("50000"), new BigDecimal("1"));
+        matchEngine.placeOrder(sellOrder);
+
+        MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, null, new BigDecimal("1"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("0.0001"));
+
+        matchEngine.placeOrder(buyMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(BigDecimal.ZERO, buyMarket.getDealtCount());
+        Assertions.assertEquals(OrderStatusEnum.NEW, sellOrder.getOrderStatus());
+    }
+
+    @Test
+    @DisplayName("按quote金额买入市价单应按逐档价格消耗预算")
+    void testMarketBuyByQuoteAmountSweepsByBudget() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(5000);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder sell1 = buildLimitOrder(1001L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("100"), new BigDecimal("1"));
+        MatchOrder sell2 = buildLimitOrder(1002L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("120"), new BigDecimal("1"));
+        matchEngine.placeOrder(sell1);
+        matchEngine.placeOrder(sell2);
+
+        MatchOrder buyMarket = buildMarketOrder(1003L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, BigDecimal.ZERO, BigDecimal.ZERO);
+        buyMarket.setMarketTargetType(MarketTargetTypeEnum.QUOTE_AMOUNT);
+        buyMarket.setTargetQuoteAmount(new BigDecimal("160"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("160"));
+
+        matchEngine.placeOrder(buyMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("1.5000000000000000"), buyMarket.getDealtCount());
+        Assertions.assertEquals(0, new BigDecimal("160").compareTo(buyMarket.getUsedQuoteAmount()));
+        Assertions.assertEquals(new BigDecimal("0.5000000000000000"), sell2.getRemainingQuantity());
+    }
+
+    @Test
+    @DisplayName("按base数量买入市价单应受冻结quote预算约束")
+    void testMarketBuyByBaseQtyRespectsQuoteBudget() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder sellOrder = buildLimitOrder(1001L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, new BigDecimal("100"), new BigDecimal("2"));
+        matchEngine.placeOrder(sellOrder);
+
+        MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, BigDecimal.ZERO, new BigDecimal("2"));
+        buyMarket.setMarketTargetType(MarketTargetTypeEnum.BASE_QTY);
+        buyMarket.setLockedQuoteAmount(new BigDecimal("150"));
+
+        matchEngine.placeOrder(buyMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("1.5000000000000000"), buyMarket.getDealtCount());
+        Assertions.assertEquals(0, new BigDecimal("150").compareTo(buyMarket.getUsedQuoteAmount()));
+        Assertions.assertEquals(new BigDecimal("0.5000000000000000"), buyMarket.getRemainingQuantity());
+    }
+
+    @Test
+    @DisplayName("按base数量卖出市价单应逐档吃最高买盘")
+    void testMarketSellByBaseQtySweepsBidBook() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(5000);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder buy1 = buildLimitOrder(1001L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, new BigDecimal("100"), new BigDecimal("1"));
+        MatchOrder buy2 = buildLimitOrder(1002L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, new BigDecimal("90"), new BigDecimal("1"));
+        matchEngine.placeOrder(buy1);
+        matchEngine.placeOrder(buy2);
+
+        MatchOrder sellMarket = buildMarketOrder(1003L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, BigDecimal.ZERO, new BigDecimal("1.5"));
+        sellMarket.setMarketTargetType(MarketTargetTypeEnum.BASE_QTY);
+        sellMarket.setLockedBaseAmount(new BigDecimal("1.5"));
+
+        matchEngine.placeOrder(sellMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, sellMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("1.5"), sellMarket.getDealtCount());
+        Assertions.assertEquals(new BigDecimal("0.5"), buy2.getRemainingQuantity());
+    }
+
+    @Test
+    @DisplayName("按quote金额卖出市价单应按逐档价格达成quote目标")
+    void testMarketSellByQuoteAmountSweepsByQuoteTarget() {
+        String symbol = "SPOT_BTC_USDT";
+
+        MatchConfig matchConfig = new MatchConfig();
+        matchConfig.setEnabled(true);
+        matchConfig.setSymbol(symbol);
+        matchConfig.setMarketOrderProtectionBps(5000);
+
+        MatchEngine matchEngine = new MatchEngine();
+        MatchEngineState engineState = matchEngine.getMatchEngineState();
+        engineState.addMatchConfig(matchConfig);
+
+        MatchOrder buy1 = buildLimitOrder(1001L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, new BigDecimal("100"), new BigDecimal("1"));
+        MatchOrder buy2 = buildLimitOrder(1002L, symbol, OrderSideEnum.BUY,
+                TimeInForceEnum.GTC, new BigDecimal("80"), new BigDecimal("1"));
+        matchEngine.placeOrder(buy1);
+        matchEngine.placeOrder(buy2);
+
+        MatchOrder sellMarket = buildMarketOrder(1003L, symbol, OrderSideEnum.SELL,
+                TimeInForceEnum.GTC, BigDecimal.ZERO, BigDecimal.ZERO);
+        sellMarket.setMarketTargetType(MarketTargetTypeEnum.QUOTE_AMOUNT);
+        sellMarket.setTargetQuoteAmount(new BigDecimal("140"));
+        sellMarket.setLockedBaseAmount(new BigDecimal("2"));
+
+        matchEngine.placeOrder(sellMarket);
+
+        Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, sellMarket.getOrderStatus());
+        Assertions.assertEquals(new BigDecimal("1.5000000000000000"), sellMarket.getDealtCount());
+        Assertions.assertEquals(0, new BigDecimal("140").compareTo(sellMarket.getReceivedQuoteAmount()));
+        Assertions.assertEquals(new BigDecimal("0.5000000000000000"), buy2.getRemainingQuantity());
     }
 
     @Test
@@ -1449,11 +1678,12 @@ class MatchEngineTest {
         // 下市价单
         MatchOrder buyMarket = buildMarketOrder(1002L, symbol, OrderSideEnum.BUY,
                 TimeInForceEnum.GTC, null, new BigDecimal("1.5"));
+        buyMarket.setLockedQuoteAmount(new BigDecimal("100000"));
         setStpParams(buyMarket, null, -1L);
         matchEngine.placeOrder(buyMarket);
 
         Assertions.assertEquals(OrderStatusEnum.FULL_FILLED, sellOrder.getOrderStatus());
-        Assertions.assertEquals(OrderStatusEnum.PARTIALLY_FILLED, buyMarket.getOrderStatus());
+        Assertions.assertEquals(OrderStatusEnum.CANCELLED, buyMarket.getOrderStatus());
         matchEngine.getMatchEngineState().getMatchContext().getOrderBook(symbol).printOrderBook(SCENE);
     }
 
@@ -1560,6 +1790,9 @@ class MatchEngineTest {
                 .timeInForce(tif)
                 .delegatePrice(price)
                 .delegateCount(qty)
+                .dealtCount(BigDecimal.ZERO)
+                .usedQuoteAmount(BigDecimal.ZERO)
+                .receivedQuoteAmount(BigDecimal.ZERO)
                 .orderStatus(OrderStatusEnum.NEW)
                 .build();
     }

@@ -12,6 +12,7 @@ public enum CancelReasonEnum {
     STP_CANCEL(4, "stp cancel maker order", "自成交保护撤挂单"),
     IOC_NOT_FULLFILL_CANCEL_REMAINING(5, "ioc order not fullfill then cancel remaining.", "ioc订单没有完全成交，剩余撤单"),
     FOK_NOT_FULLFILL_CANCEL(6, "fok order can not full fill. cancel", "fok订单不能完全成交，撤单"),
+    MARKET_NOT_FULLFILL_CANCEL_REMAINING(7, "market order not fullfill then cancel remaining.", "市价单没有完全成交，剩余撤单"),
     ;
 
     CancelReasonEnum(int code, String remark, String desc) {

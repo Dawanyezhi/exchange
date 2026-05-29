@@ -4,8 +4,8 @@
                xsi:schemaLocation="http://fixprotocol.io/2016/SBE http://fixprotocol.io/2016/SBE"
                package="com.laser.exchange.common.codec.snapshot"
                id="3"
-               version="0"
-               semanticVersion="1.0.0"
+               version="1"
+               semanticVersion="1.1.0"
                byteOrder="littleEndian">
     <types>
         <composite name="messageHeader" description="Standard SBE message header.">
@@ -72,7 +72,8 @@
         <field name="baseCoinId" id="2" type="uint32"/>
         <field name="quoteCoinId" id="3" type="uint32"/>
         <field name="enabled" id="4" type="BooleanType"/>
-        <data name="symbolName" id="5" type="varStringEncoding"/>
+        <field name="marketOrderProtectionBps" id="5" type="uint32" sinceVersion="1"/>
+        <data name="symbolName" id="6" type="varStringEncoding"/>
     </message>
 
     <!-- OrderBook 起始标记，后续跟随的 MatchOrderEntry 隶属于此 symbol，直到下一个 OrderBookStart 或 SymbolSerialNumEntry -->

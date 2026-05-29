@@ -134,8 +134,10 @@ do_place() {
     local price="${2:-50000.00}"
     local quantity="${3:-1.5}"
     local side="${4:-BUY}"
+    local order_type="${5:-LIMIT}"
+    local locked_quote="${6:-0}"
 
-    log_info "Placing order: symbolCode=${symbol_code}, price=${price}, qty=${quantity}, side=${side}"
+    log_info "Placing order: symbolCode=${symbol_code}, type=${order_type}, price=${price}, qty=${quantity}, side=${side}, lockedQuote=${locked_quote}"
     curl -s -X POST "${BASE_URL}/api/order/place" \
         -H "Content-Type: application/json" \
         -d "{
@@ -143,11 +145,12 @@ do_place() {
             \"clientOid\": \"cli-$(date +%s)\",
             \"accountId\": 10001,
             \"symbolCode\": ${symbol_code},
-            \"orderType\": \"LIMIT\",
+            \"orderType\": \"${order_type}\",
             \"orderSide\": \"${side}\",
             \"timeInForce\": \"GTC\",
             \"delegatePrice\": ${price},
             \"delegateCount\": ${quantity},
+            \"lockedQuoteAmount\": ${locked_quote},
             \"stpAccountId\": 10001,
             \"stpStrategyEnum\": \"DEFAULT\"
         }" | python3 -m json.tool 2>/dev/null || echo ""
@@ -228,8 +231,8 @@ do_help() {
     log                           Tail the log file (Ctrl+C to quit)
 
   Order Commands:
-    place [symbolCode] [price] [qty] [side]
-                                  Place an order (defaults: 1 50000.00 1.5 BUY)
+    place [symbolCode] [price] [qty] [side] [type] [lockedQuote]
+                                  Place an order (defaults: 1 50000.00 1.5 BUY LIMIT 0)
     cancel <orderId> [symbolCode]
                                   Cancel an order by orderId
     amend <orderId> [newPrice] [newQty] [symbolCode]
@@ -246,6 +249,8 @@ do_help() {
     ./client.sh start                       # Build and start
     ./client.sh place                       # Place a default BUY order
     ./client.sh place 1 49999.99 2.0 SELL   # Place a SELL order
+    ./client.sh place 1 0 1.0 BUY MARKET 50000
+                                            # Place a BUY market order with quote budget
     ./client.sh cancel 1234567890           # Cancel order by ID
     ./client.sh amend 1234567890 50100 2.5  # Amend order price and qty
     ./client.sh batch-start 200             # Start batch at 200 orders/s
@@ -272,7 +277,7 @@ case "${1:-help}" in
     restart)    do_restart ;;
     status)     do_status ;;
     log)        do_log ;;
-    place)      do_place "${2:-1}" "${3:-50000.00}" "${4:-1.5}" "${5:-BUY}" ;;
+    place)      do_place "${2:-1}" "${3:-50000.00}" "${4:-1.5}" "${5:-BUY}" "${6:-LIMIT}" "${7:-0}" ;;
     cancel)
         if [ -z "${2:-}" ]; then
             log_error "Missing orderId. Usage: ./client.sh cancel <orderId> [symbolCode]"

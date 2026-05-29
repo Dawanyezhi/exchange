@@ -9,6 +9,7 @@ import com.laser.exchange.common.enums.CancelReasonEnum;
 import com.laser.exchange.matching.enums.OpEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
+import com.laser.exchange.matching.config.MarketOrderConfig;
 import com.laser.exchange.matching.core.service.StpStrategyService;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
 import com.laser.exchange.common.utils.BigDecimalUtil;
@@ -19,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 
 /**
@@ -32,6 +34,9 @@ public class MatchEngine {
     private MatchEngineState matchEngineState = new MatchEngineState();
     private StpStrategyService stpStrategyService = new StpStrategyService();
     private FokOrderProcessor fokOrderProcessor = new FokOrderProcessor();
+
+    @Resource
+    private MarketOrderConfig marketOrderConfig;
 
     /**
      * 撮合结果事件助手：全周期内由 CommandDispatcher 控制生命周期 (beginRequest/endRequest)。
@@ -49,6 +54,10 @@ public class MatchEngine {
      */
     private List<MatchOrder> pendingRemoves = new LinkedList<>();
 
+    private BigDecimal fallbackMinTradeBaseQty = MarketOrderConfig.DEFAULT_MIN_TRADE_BASE_QTY;
+    private long fallbackMarketOrderProtectionBps = MarketOrderConfig.DEFAULT_PROTECTION_BPS;
+    private static final BigDecimal DUST_EPSILON = new BigDecimal("0.0000000000000001");
+
     /**
      * todo 临时代码，添加配置
      */
@@ -65,6 +74,7 @@ public class MatchEngine {
         MatchConfig matchConfig = new MatchConfig();
         matchConfig.setEnabled(true);
         matchConfig.setSymbol(symbolConfig.getSymbolName());
+        matchConfig.setMarketOrderProtectionBps(getDefaultMarketOrderProtectionBps());
         matchEngineState.addMatchConfig(matchConfig);
 
         log.info("init symbolConfig :{}", symbolConfig.getSymbolName());
@@ -191,6 +201,20 @@ public class MatchEngine {
             return true;
         }
         return !matchConfig.isEnabled();
+    }
+
+    public long getDefaultMarketOrderProtectionBps() {
+        if (marketOrderConfig != null) {
+            return marketOrderConfig.getProtectionBps();
+        }
+        return fallbackMarketOrderProtectionBps;
+    }
+
+    public BigDecimal getMinTradeBaseQty() {
+        if (marketOrderConfig != null) {
+            return marketOrderConfig.getMinTradeBaseQty();
+        }
+        return fallbackMinTradeBaseQty;
     }
 
 
@@ -335,8 +359,8 @@ public class MatchEngine {
             orderBook.removeOrder(order);
         }
 
-        // 触发下一次市价单成交调度（盘口会恢复）
-        handleMarketOrderAfterMatching(newOrder, orderBook);
+        // 市价单不再悬挂；保留该调用只负责清理已完成的历史队列订单。
+        // handleMarketOrderAfterMatching(newOrder, orderBook);
 
     }
 
@@ -346,7 +370,7 @@ public class MatchEngine {
 
             OrderStatusEnum orderStatus = newOrder.getOrderStatus();
 
-            if (orderStatus.over()) {
+            if (orderStatus != null && orderStatus.over()) {
                 // 移除队列
                 orderBook.removeOrder(newOrder);
             } else {
@@ -443,31 +467,227 @@ public class MatchEngine {
 
 
     /**
-     * 市价单一定是taker
-     * 一般来说为了让市价单完全成交，会将在途市价单放到一个队列
-     * 然后再定时按照队列中市价单添加顺序，将市价单拿出来
-     * 再次发送到订单簿中与maker进行成交
-     * @param marketOrder
-     * @param orderBook
+     * 市价单一定是 taker，不入订单簿，不悬挂等待后续流动性。
      */
     public void processMarketOrder(MatchOrder marketOrder, OrderBook orderBook) {
 
-        log.debug("[市价单处理] orderId={}, 立即按最优价成交", marketOrder.getOrderId());
+        log.debug("[市价单处理] orderId={}, 立即按保护价和预算成交", marketOrder.getOrderId());
 
-        // 判断市价单是否可以直接撮合
-        // 市价单也要遵循时间优先策略
-        boolean matchInstantly = orderBook.marketOrderMatchInstantly(marketOrder);
-
-        // 市价单先入队列
-        orderBook.addOrder(marketOrder);
-
-        if (matchInstantly) {
-            // 先进行撮合
-            tryMatchInstantly(marketOrder, orderBook);
-        } else {
-            // 需要发起定时调度任务，触发当前币对买卖市价队列定时撮合的任务（市价单悬挂任务）
-            publishMarketHangingCmd(marketOrder);
+        BigDecimal referencePrice = getMarketReferencePrice(marketOrder, orderBook);
+        if (!BigDecimalUtil.greaterThanZero(referencePrice)) {
+            cancelMarketRemaining(marketOrder);
+            return;
         }
+
+        BigDecimal protectionPrice = getMarketProtectionPrice(marketOrder, referencePrice);
+
+        tryMatchMarketOrder(marketOrder, orderBook, protectionPrice);
+
+        if (!marketOrder.isMatchOver()) {
+            cancelMarketRemaining(marketOrder);
+        }
+    }
+
+    private BigDecimal getMarketReferencePrice(MatchOrder marketOrder, OrderBook orderBook) {
+        return marketOrder.isBuy() ? orderBook.getBestAskPrice() : orderBook.getBestBidPrice();
+    }
+
+    private BigDecimal getMarketProtectionPrice(MatchOrder marketOrder, BigDecimal referencePrice) {
+        MatchConfig matchConfig = matchEngineState.getMatchConfig(marketOrder.getSymbolId());
+        long protectionBps = matchConfig != null
+                ? MarketOrderConfig.normalizeProtectionBps(matchConfig.getMarketOrderProtectionBps())
+                : getDefaultMarketOrderProtectionBps();
+        BigDecimal ratio = BigDecimal.valueOf(protectionBps)
+                .divide(BigDecimal.valueOf(10000), BigDecimalUtil.DEF_SCALE, RoundingMode.HALF_UP);
+        if (marketOrder.isBuy()) {
+            return referencePrice.multiply(BigDecimal.ONE.add(ratio));
+        }
+        return referencePrice.multiply(BigDecimal.ONE.subtract(ratio));
+    }
+
+    private boolean marketPriceOutOfProtection(MatchOrder marketOrder, BigDecimal linePrice, BigDecimal protectionPrice) {
+        if (marketOrder.isBuy()) {
+            return linePrice.compareTo(protectionPrice) > 0;
+        }
+        return linePrice.compareTo(protectionPrice) < 0;
+    }
+
+    void tryMatchMarketOrder(MatchOrder marketOrder, OrderBook orderBook, BigDecimal protectionPrice) {
+        TreeMap<BigDecimal, DepthLine> oppositeBook = orderBook.getOppositeBook(marketOrder);
+        Iterator<Map.Entry<BigDecimal, DepthLine>> iterator = oppositeBook.entrySet().iterator();
+        pendingRemoves.clear();
+
+        while (iterator.hasNext()) {
+            Map.Entry<BigDecimal, DepthLine> lineEntry = iterator.next();
+            BigDecimal linePrice = lineEntry.getKey();
+            DepthLine depthLine = lineEntry.getValue();
+
+            if (depthLine.isEmpty()) {
+                log.warn("depthLine is empty. price:{}, symbol:{}", linePrice.toPlainString(), marketOrder.getSymbolId());
+                iterator.remove();
+                continue;
+            }
+
+            if (marketPriceOutOfProtection(marketOrder, linePrice, protectionPrice)) {
+                break;
+            }
+
+            boolean exit = matchMarketDepthLine(marketOrder, depthLine, orderBook, pendingRemoves);
+            MatchCoreService.INSTANCE.clearEmptyDepthLine(depthLine, iterator);
+            if (exit) {
+                break;
+            }
+        }
+
+        for (MatchOrder order : pendingRemoves) {
+            orderBook.removeOrder(order);
+        }
+    }
+
+    private boolean matchMarketDepthLine(MatchOrder marketOrder, DepthLine depthLine,
+                                         OrderBook orderBook, List<MatchOrder> pendingRemoves) {
+        Iterator<MatchOrder> orderIterator = depthLine.iterator();
+
+        // 撮合每笔订单
+        while (orderIterator.hasNext()) {
+            MatchOrder maker = orderIterator.next();
+            if (maker == null || maker.isMarket()) {
+                return true;
+            }
+
+            OpEnum opEnum = stpStrategyService.processSTP(marketOrder, maker, pendingRemoves);
+            if (opEnum == OpEnum.OP_BREAK) {
+                return true;
+            }
+            if (opEnum == OpEnum.OP_CONTINUE) {
+                continue;
+            }
+
+            BigDecimal matchedQty = calculateMarketMatchedQty(marketOrder, maker);
+            if (matchedQty.compareTo(getMinTradeBaseQty()) < 0) {
+                return true;
+            }
+
+            BigDecimal takerDealtBefore = marketOrder.getDealtCount() != null
+                    ? marketOrder.getDealtCount() : BigDecimal.ZERO;
+            marketOrder.updateFilledQuantity(matchedQty);
+            maker.updateFilledQuantity(matchedQty);
+
+            // 更新quote的成交进度
+            addMarketQuoteProgress(marketOrder, maker.getDelegatePrice(), matchedQty);
+
+            if (maker.fullFilled()) {
+                orderIterator.remove();
+                orderBook.removeFromOrderMapOnly(maker.getOrderId());
+            }
+
+            BigDecimal takerDealtAfter = marketOrder.getDealtCount() != null
+                    ? marketOrder.getDealtCount() : BigDecimal.ZERO;
+            BigDecimal thisTradeAmount = takerDealtAfter.subtract(takerDealtBefore);
+
+            if (thisTradeAmount.signum() > 0) {
+                eventsHelper.appendMatch(
+                        marketOrder,
+                        maker,
+                        maker.getDelegatePrice(),
+                        thisTradeAmount,
+                        marketOrder.getRemainingQuantity(),
+                        marketOrder.getOrderStatus()
+                );
+            }
+
+            if (marketOrder.isMatchOver()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BigDecimal calculateMarketMatchedQty(MatchOrder marketOrder, MatchOrder maker) {
+        BigDecimal makerRemainingQty = maker.getRemainingQuantity();
+
+        if (marketOrder.isBuy()) {
+            if (marketOrder.isMarketTargetQuoteAmount()) {
+                // 按金额买入：订单目标是“最多花多少 quote”，每一档都要用剩余 quote 预算按 maker 价格换算可买 base。
+                BigDecimal maxQtyByBudget = quoteToBaseQty(marketOrder.getRemainingQuoteBudget(), maker.getDelegatePrice());
+                return makerRemainingQty.min(maxQtyByBudget);
+            }
+
+            // 按数量买入：订单目标是“买多少 base”，但仍必须受冻结 quote 预算约束，避免扫到高价档后透支。
+            BigDecimal qtyByTarget = marketOrder.getRemainingQuantity().min(makerRemainingQty);
+            BigDecimal maxQtyByBudget = quoteToBaseQty(marketOrder.getRemainingQuoteBudget(), maker.getDelegatePrice());
+            return qtyByTarget.min(maxQtyByBudget);
+        }
+
+        if (marketOrder.isMarketTargetQuoteAmount()) {
+            // 按金额卖出：订单目标是“获得多少 quote”，同时受已冻结 base 预算约束。
+            BigDecimal maxQtyByQuoteTarget = quoteToBaseQty(marketOrder.getRemainingQuoteTarget(), maker.getDelegatePrice());
+            return makerRemainingQty
+                    .min(maxQtyByQuoteTarget)
+                    .min(marketOrder.getRemainingBaseBudget());
+        }
+
+        // 按数量卖出：只需要按剩余 base 数量逐档吃买盘。
+        return marketOrder.getMatchedQty(makerRemainingQty);
+    }
+
+    private BigDecimal quoteToBaseQty(BigDecimal quoteAmount, BigDecimal price) {
+        if (!BigDecimalUtil.greaterThanZero(quoteAmount) || !BigDecimalUtil.greaterThanZero(price)) {
+            return BigDecimal.ZERO;
+        }
+        // 当前系统没有币对级 lotSize，先按 DEF_SCALE 向下取整；minTradeBaseQty 再负责过滤无法成交的 dust。
+        return quoteAmount.divide(price, BigDecimalUtil.DEF_SCALE, RoundingMode.FLOOR);
+    }
+
+    private void addMarketQuoteProgress(MatchOrder marketOrder, BigDecimal price, BigDecimal qty) {
+        BigDecimal tradeQuoteAmount = price.multiply(qty);
+        if (marketOrder.isBuy()) {
+            BigDecimal usedQuoteAmount = marketOrder.getUsedQuoteAmount() != null
+                ? marketOrder.getUsedQuoteAmount() : BigDecimal.ZERO;
+            marketOrder.setUsedQuoteAmount(usedQuoteAmount.add(tradeQuoteAmount));
+            normalizeQuoteAmountMarketBuyIfDust(marketOrder);
+            refreshMarketOrderStatusAfterQuoteProgress(marketOrder);
+            return;
+        }
+
+        if (marketOrder.isMarketTargetQuoteAmount()) {
+            BigDecimal receivedQuoteAmount = marketOrder.getReceivedQuoteAmount() != null
+                    ? marketOrder.getReceivedQuoteAmount() : BigDecimal.ZERO;
+            marketOrder.setReceivedQuoteAmount(receivedQuoteAmount.add(tradeQuoteAmount));
+            normalizeQuoteAmountMarketSellIfDust(marketOrder);
+            refreshMarketOrderStatusAfterQuoteProgress(marketOrder);
+        }
+    }
+
+    private void refreshMarketOrderStatusAfterQuoteProgress(MatchOrder marketOrder) {
+        if (marketOrder.fullFilled()) {
+            // 金额市价单的完成条件依赖 used/received quote，需要在 quote 进度更新后再刷新一次订单状态。
+            marketOrder.setOrderStatus(OrderStatusEnum.FULL_FILLED);
+        }
+    }
+
+    private void normalizeQuoteAmountMarketBuyIfDust(MatchOrder marketOrder) {
+        if (!marketOrder.isMarketTargetQuoteAmount() || !marketOrder.isBuy()) {
+            return;
+        }
+        BigDecimal remainingQuoteBudget = marketOrder.getRemainingQuoteBudget();
+        if (remainingQuoteBudget.compareTo(DUST_EPSILON) <= 0) {
+            // 金额买单最后可能因为除价取整留下极小 quote dust；结果层按 0 返回，避免订单长期停留在部分成交状态。
+            marketOrder.setUsedQuoteAmount(marketOrder.getLockedQuoteAmount());
+        }
+    }
+
+    private void normalizeQuoteAmountMarketSellIfDust(MatchOrder marketOrder) {
+        BigDecimal remainingQuoteTarget = marketOrder.getRemainingQuoteTarget();
+        if (remainingQuoteTarget.compareTo(DUST_EPSILON) <= 0) {
+            // 金额卖单同样可能留下无法用一个最小 base 步长达成的 quote dust，清算层释放剩余 base 预算即可。
+            marketOrder.setReceivedQuoteAmount(marketOrder.getTargetQuoteAmount());
+        }
+    }
+
+    private void cancelMarketRemaining(MatchOrder marketOrder) {
+        marketOrder.cancel(CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING);
+        eventsHelper.appendCancel(marketOrder, CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING);
     }
 
     /**

@@ -63,7 +63,7 @@ public class MatchEngineClusteredService implements ClusteredService {
     @Resource
     private ClusterRoleHolder roleHolder;
 
-    private final SnapshotManager snapshotManager = new SnapshotManager();
+    private SnapshotManager snapshotManager;
 
     private volatile Cluster cluster;
 
@@ -80,6 +80,7 @@ public class MatchEngineClusteredService implements ClusteredService {
 
         // 初始化 MDC 广播器（复用 cluster 内置 Aeron client）
         broadcasterHolder.init(cluster.aeron());
+        snapshotManager = new SnapshotManager(matchEngine.getDefaultMarketOrderProtectionBps());
 
         // 如果 raftlog 包含快照，先恢复
         if (snapshotImage != null) {

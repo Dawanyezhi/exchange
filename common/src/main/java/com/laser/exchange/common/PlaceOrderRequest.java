@@ -1,6 +1,7 @@
 package com.laser.exchange.common;
 
 import com.laser.exchange.common.codec.*;
+import com.laser.exchange.common.enums.MarketTargetTypeEnum;
 import com.laser.exchange.common.enums.OrderSideEnum;
 import com.laser.exchange.common.enums.OrderType;
 import com.laser.exchange.common.enums.StpStrategyEnum;
@@ -64,8 +65,34 @@ public class PlaceOrderRequest extends AbstractRequest {
 
     /**
      * 委托数量
+     *
+     * <p>限价单、按 base 数量的市价单使用该字段作为基础币目标数量。
+     * 按 quote 金额的市价单不依赖该字段表达金额目标，金额目标使用 {@link #targetQuoteAmount}。
      */
     private BigDecimal delegateCount;
+
+    /**
+     * 锁定计价币金额，用于买市价单进入撮合后的预算上限。买市价单: BUY + QUOTE_AMOUNT / BUY + BASE_QTY
+     */
+    private BigDecimal lockedQuoteAmount;
+
+    /**
+     * 目标计价币金额。
+     *
+     * <p>BUY + QUOTE_AMOUNT 表示最多花多少 quote；
+     * SELL + QUOTE_AMOUNT 表示目标获得多少 quote，手续费是否折算为净额由账户/清算层处理。
+     */
+    private BigDecimal targetQuoteAmount;
+
+    /**
+     * 锁定基础币金额，用于卖市价单进入撮合后的预算上限。卖市价单: SELL + BASE_QTY / SELL + QUOTE_AMOUNT
+     */
+    private BigDecimal lockedBaseAmount;
+
+    /**
+     * 市价单目标单位。限价单默认按 BASE_QTY 处理。
+     */
+    private MarketTargetTypeEnum marketTargetType;
 
     /**
      * 自成交保护的账户id（挂单maker的stpAccount和taker的stpAccount如果相等，就代表可能发生自成交）
@@ -115,6 +142,11 @@ public class PlaceOrderRequest extends AbstractRequest {
         encoder.delegatePrice(BigDecimalUtil.defaultToString(this.getDelegatePrice()));
         encoder.delegateCount(BigDecimalUtil.defaultToString(this.getDelegateCount()));
         encoder.clientOid(this.getClientOid() != null ? this.getClientOid() : "");
+        encoder.lockedQuoteAmount(BigDecimalUtil.defaultToString(this.getLockedQuoteAmount()));
+        encoder.targetQuoteAmount(BigDecimalUtil.defaultToString(this.getTargetQuoteAmount()));
+        encoder.lockedBaseAmount(BigDecimalUtil.defaultToString(this.getLockedBaseAmount()));
+        encoder.marketTargetType(this.getMarketTargetType() != null
+                ? this.getMarketTargetType().name() : "");
 
         return MessageHeaderEncoder.ENCODED_LENGTH + encoder.encodedLength();
     }
@@ -165,6 +197,16 @@ public class PlaceOrderRequest extends AbstractRequest {
         this.setDelegateCount(BigDecimalUtil.stringToBigDecimal(countStr));
 
         this.setClientOid(decoder.clientOid());
+
+        if (decoder.actingVersion() >= 2) {
+            this.setLockedQuoteAmount(BigDecimalUtil.stringToBigDecimal(decoder.lockedQuoteAmount()));
+        } else {
+            this.setLockedQuoteAmount(BigDecimal.ZERO);
+        }
+
+        this.setTargetQuoteAmount(BigDecimalUtil.stringToBigDecimal(decoder.targetQuoteAmount()));
+        this.setLockedBaseAmount(BigDecimalUtil.stringToBigDecimal(decoder.lockedBaseAmount()));
+        this.setMarketTargetType(MarketTargetTypeEnum.ofName(decoder.marketTargetType()));
 
         return this;
     }

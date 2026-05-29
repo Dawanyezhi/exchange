@@ -5,6 +5,7 @@ import com.laser.exchange.common.codec.MessageHeaderEncoder;
 import com.laser.exchange.common.codec.OrderStatus;
 import com.laser.exchange.common.codec.PlaceOrderResultDecoder;
 import com.laser.exchange.common.codec.PlaceOrderResultEncoder;
+import com.laser.exchange.common.enums.MarketTargetTypeEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.utils.BigDecimalUtil;
 import lombok.AllArgsConstructor;
@@ -35,6 +36,9 @@ public class PlaceOrderResult extends MatchResult {
     private String symbolId;
     private BigDecimal delegatePrice;
     private BigDecimal delegateCount;
+    private BigDecimal lockedBaseAmount;
+    private BigDecimal lockedQuoteAmount;
+    private MarketTargetTypeEnum marketTargetType;
 
     @Override
     public int encode(MutableDirectBuffer buffer, int offset) {
@@ -58,6 +62,9 @@ public class PlaceOrderResult extends MatchResult {
         enc.symbolId(symbolId != null ? symbolId : "");
         enc.delegatePrice(BigDecimalUtil.defaultToString(delegatePrice));
         enc.delegateCount(BigDecimalUtil.defaultToString(delegateCount));
+        enc.lockedBaseAmount(BigDecimalUtil.defaultToString(lockedBaseAmount));
+        enc.lockedQuoteAmount(BigDecimalUtil.defaultToString(lockedQuoteAmount));
+        enc.marketTargetType(marketTargetType != null ? marketTargetType.name() : "");
 
         return MessageHeaderEncoder.ENCODED_LENGTH + enc.encodedLength();
     }
@@ -80,6 +87,9 @@ public class PlaceOrderResult extends MatchResult {
         this.symbolId = dec.symbolId();
         this.delegatePrice = BigDecimalUtil.stringToBigDecimal(dec.delegatePrice());
         this.delegateCount = BigDecimalUtil.stringToBigDecimal(dec.delegateCount());
+        this.lockedBaseAmount = BigDecimalUtil.stringToBigDecimal(dec.lockedBaseAmount());
+        this.lockedQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.lockedQuoteAmount());
+        this.marketTargetType = MarketTargetTypeEnum.ofName(dec.marketTargetType());
         return this;
     }
 }
