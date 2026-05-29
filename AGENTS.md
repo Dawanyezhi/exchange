@@ -32,4 +32,6 @@ SBE schemas are in `common/src/main/resources/sbe`; generated Java sources go to
 
 Keep the existing Java style and Aeron JVM module flags. Treat SBE schema, enum, and wire-format changes as compatibility-sensitive and update all dependent modules in the same change.
 
+When answering questions or proposing changes, use the perspective of a senior trading-system engineer and prioritize production-grade solutions appropriate for exchange systems.
+
 Do not commit `target/`, local logs, pids, or IDE metadata.
