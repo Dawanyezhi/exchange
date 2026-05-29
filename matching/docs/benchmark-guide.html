@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser 撮合引擎 Benchmark 使用手册</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; scroll-behavior: smooth; }
+        .sidebar { position: fixed; top: 0; left: 0; width: 280px; height: 100vh; overflow-y: auto; background: #f8f9fa; border-right: 1px solid #dee2e6; padding: 1rem 0; z-index: 1000; }
+        .sidebar .nav-link { color: #495057; padding: 0.35rem 1.2rem; font-size: 0.88rem; border-left: 3px solid transparent; transition: all 0.15s; }
+        .sidebar .nav-link:hover { color: #0d6efd; background: #e9ecef; }
+        .sidebar .nav-link.active { color: #0d6efd; border-left-color: #0d6efd; font-weight: 600; }
+        .sidebar .nav-link.sub { padding-left: 2.2rem; font-size: 0.8rem; }
+        .sidebar .brand { padding: 0.8rem 1.2rem 1.2rem; font-weight: 700; font-size: 1.05rem; color: #212529; border-bottom: 1px solid #dee2e6; margin-bottom: 0.5rem; }
+        .main-content { margin-left: 280px; padding: 2rem 3rem 5rem; max-width: 1100px; }
+        .section-title { border-bottom: 2px solid #0d6efd; padding-bottom: 0.5rem; margin-top: 2.5rem; }
+        .card-scenario { border-left: 4px solid #0d6efd; }
+        .card-file { border-left: 4px solid #198754; }
+        pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem; overflow-x: auto; }
+        pre code { font-size: 0.84rem; color: #24292e; }
+        table th { white-space: nowrap; }
+        .config-table td:first-child { font-family: monospace; color: #d63384; font-size: 0.88rem; }
+        .btn-top { position: fixed; bottom: 30px; right: 30px; z-index: 9999; width: 46px; height: 46px; border-radius: 50%; display: none; align-items: center; justify-content: center; font-size: 1.3rem; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+        .mermaid { display: flex; justify-content: center; margin: 1rem 0; }
+        .callout { border-left: 4px solid; padding: 0.8rem 1rem; border-radius: 0 4px 4px 0; margin: 1rem 0; }
+        .callout-info { border-color: #0d6efd; background: #e7f1ff; }
+        .callout-warn { border-color: #ffc107; background: #fff9e6; }
+        .callout-danger { border-color: #dc3545; background: #ffeef0; }
+        .step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #0d6efd; color: #fff; font-weight: 700; font-size: 0.85rem; margin-right: 0.5rem; }
+        @media (max-width: 991px) { .sidebar { display: none; } .main-content { margin-left: 0; padding: 1rem; } }
+    </style>
+</head>
+<body>
+
+<!-- ==================== 左侧导航栏 ==================== -->
+<nav class="sidebar d-none d-lg-block">
+    <div class="brand">Benchmark 使用手册</div>
+    <ul class="nav flex-column">
+        <li class="nav-item"><a class="nav-link" href="#intro">一、概述</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#what-is-jmh">什么是 JMH</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#why-benchmark">为什么需要 Benchmark</a></li>
+        <li class="nav-item"><a class="nav-link" href="#module-arch">二、模块架构</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#file-list">文件清单</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#class-relation">类关系图</a></li>
+        <li class="nav-item"><a class="nav-link" href="#jmh-lifecycle">三、JMH 生命周期</a></li>
+        <li class="nav-item"><a class="nav-link" href="#engine-flow">四、撮合引擎流程</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#placeorder-flow">placeOrder 主流程</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#match-flow">撮合核心流程</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#orderbook-struct">订单簿数据结构</a></li>
+        <li class="nav-item"><a class="nav-link" href="#scenarios">五、9 大测试场景</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s1">1. GTC 不交叉挂单</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s2">2. GTC 完全成交</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s3">3. GTC 多档位成交</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s4">4. IOC 立即成交</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s5">5. FOK 完全成交</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s6">6. FOK 撤单</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s7">7. POST_ONLY 挂单</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s8">8. 深度订单簿扫盘</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#s9">9. 混合场景</a></li>
+        <li class="nav-item"><a class="nav-link" href="#config">六、配置参数</a></li>
+        <li class="nav-item"><a class="nav-link" href="#run-guide">七、运行指南</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#run-ide">IDE 运行</a></li>
+        <li class="nav-item"><a class="nav-link sub" href="#run-maven">Maven 运行</a></li>
+        <li class="nav-item"><a class="nav-link" href="#read-result">八、解读结果</a></li>
+        <li class="nav-item"><a class="nav-link" href="#complexity">九、复杂度分析</a></li>
+        <li class="nav-item"><a class="nav-link" href="#faq">十、常见问题</a></li>
+    </ul>
+</nav>
+
+<!-- ==================== 回到顶部按钮 ==================== -->
+<a href="#intro" class="btn btn-primary btn-top" id="btnTop" title="回到顶部">&uarr;</a>
+
+<!-- ==================== 主内容区 ==================== -->
+<div class="main-content">
+
+<!-- ==================== 一、概述 ==================== -->
+<h1 id="intro" class="mb-3">Laser 撮合引擎 Benchmark 使用手册</h1>
+<div class="alert alert-info mb-4">
+    <strong>项目：</strong>laser-matching-engine &nbsp;|&nbsp;
+    <strong>目标方法：</strong><code>MatchEngine#placeOrder(MatchOrder)</code> &nbsp;|&nbsp;
+    <strong>框架：</strong>JMH 1.37 &nbsp;|&nbsp;
+    <strong>Java：</strong>17
+</div>
+
+<p>本手册面向希望了解和使用撮合引擎性能测试套件的开发者和学员。通过阅读本手册，您将掌握：</p>
+<ul>
+    <li>JMH 基准测试的核心概念和生命周期</li>
+    <li>撮合引擎 <code>placeOrder</code> 方法的完整处理流程</li>
+    <li>9 大 Benchmark 场景的设计思路和覆盖的代码路径</li>
+    <li>如何配置、运行 Benchmark 并解读结果</li>
+</ul>
+
+<h4 id="what-is-jmh">什么是 JMH</h4>
+<p><strong>JMH</strong>（Java Microbenchmark Harness）是 OpenJDK 官方提供的微基准测试框架。
+它解决了手写 <code>System.nanoTime()</code> 计时的常见陷阱：</p>
+<table class="table table-bordered table-sm">
+    <thead class="table-light"><tr><th>陷阱</th><th>JMH 如何解决</th></tr></thead>
+    <tbody>
+        <tr><td>JIT 编译器优化掉"无用"代码</td><td><code>Blackhole</code> 消费返回值，阻止死码消除</td></tr>
+        <tr><td>JVM 启动时的冷启动效应</td><td><code>@Warmup</code> 先预热，让 JIT 充分编译</td></tr>
+        <tr><td>JVM 状态残留影响结果</td><td><code>@Fork</code> 在独立 JVM 进程中运行</td></tr>
+        <tr><td>系统负载波动</td><td>多次迭代取统计值（均值、标准差）</td></tr>
+    </tbody>
+</table>
+
+<h4 id="why-benchmark">为什么需要 Benchmark 撮合引擎</h4>
+<p>撮合引擎是交易系统的核心，每笔订单的处理延迟直接影响用户体验和系统吞吐量。通过 Benchmark 我们可以：</p>
+<ol>
+    <li><strong>量化性能基线</strong> — 知道各种订单类型的处理耗时（微秒级）</li>
+    <li><strong>发现性能瓶颈</strong> — 对比不同场景，定位最耗时的路径</li>
+    <li><strong>验证优化效果</strong> — 修改代码后，对比前后的 Benchmark 数据</li>
+    <li><strong>容量规划</strong> — 根据吞吐量数据估算系统承载能力</li>
+</ol>
+
+<!-- ==================== 二、模块架构 ==================== -->
+<h2 id="module-arch" class="section-title">二、模块架构</h2>
+
+<h4 id="file-list">文件清单</h4>
+<p>Benchmark 模块位于 <code>src/test/java/com/laser/exchange/matching/benchmark/</code> 包下，包含 4 个类：</p>
+
+<div class="card card-file mb-3">
+    <div class="card-body">
+        <h6><code>BenchmarkConfig.java</code> — 配置中心</h6>
+        <p class="mb-1">管理所有可配置参数（预填充订单数、价格档位数、JMH 迭代次数等），支持通过 JVM <code>-D</code> 属性覆盖默认值。</p>
+<pre><code>// 从系统属性中读取配置，未设置则使用默认值
+BenchmarkConfig config = BenchmarkConfig.fromSystemProperties();
+int orders = config.getPrefillOrders();  // 默认 10000</code></pre>
+    </div>
+</div>
+
+<div class="card card-file mb-3">
+    <div class="card-body">
+        <h6><code>OrderGenerator.java</code> — 订单工厂</h6>
+        <p class="mb-1">快速构造各类型的 <code>MatchOrder</code>，内置自增 ID 生成器保证唯一性。</p>
+<pre><code>// 构造一个 GTC 限价买单，价格 49000，数量 1.0
+MatchOrder order = OrderGenerator.limitBuy(49000, 1.0, TimeInForceEnum.GTC);
+
+// 构造一个带 STP 配置的卖单
+MatchOrder stp = OrderGenerator.limitSellWithStp(49100, 1.0,
+        TimeInForceEnum.GTC, accountId, stpAccountId, StpStrategyEnum.CANCEL_MAKER);</code></pre>
+    </div>
+</div>
+
+<div class="card card-file mb-3">
+    <div class="card-body">
+        <h6><code>MatchEngineBenchmark.java</code> — JMH 基准测试主类</h6>
+        <p class="mb-1">包含 9 个 <code>@Benchmark</code> 方法，每个方法测试一个特定的撮合场景。通过 <code>@Setup</code> 注解管理测试状态。</p>
+    </div>
+</div>
+
+<div class="card card-file mb-3">
+    <div class="card-body">
+        <h6><code>MatchEngineBenchmarkRunner.java</code> — 运行器</h6>
+        <p class="mb-1">提供 <code>main()</code> 方法，读取配置并启动 JMH。运行结果输出到控制台和 <code>benchmark-result.json</code>。</p>
+    </div>
+</div>
+
+<h4 id="class-relation">类关系图</h4>
+<div class="mermaid">
+graph TD
+    Runner["MatchEngineBenchmarkRunner<br/><i>运行入口 main()</i>"]
+    Config["BenchmarkConfig<br/><i>配置中心</i>"]
+    Bench["MatchEngineBenchmark<br/><i>9 个 @Benchmark 方法</i>"]
+    Gen["OrderGenerator<br/><i>订单工厂</i>"]
+    Engine["MatchEngine<br/><i>被测对象</i>"]
+
+    Runner -->|"读取配置"| Config
+    Runner -->|"启动 JMH"| Bench
+    Bench -->|"构造订单"| Gen
+    Bench -->|"调用 placeOrder"| Engine
+    Config -.->|"-D 系统属性"| Bench
+
+    style Runner fill:#0d6efd,color:#fff
+    style Engine fill:#fd7e14,color:#fff
+    style Config fill:#6c757d,color:#fff
+</div>
+
+<!-- ==================== 三、JMH 生命周期 ==================== -->
+<h2 id="jmh-lifecycle" class="section-title">三、JMH 生命周期</h2>
+
+<p>理解 JMH 的生命周期是正确编写和解读 Benchmark 的关键。本项目使用了两层 <code>@Setup</code>：</p>
+
+<div class="mermaid">
+sequenceDiagram
+    participant Runner as Runner.main()
+    participant JMH as JMH Framework
+    participant Fork as Forked JVM
+    participant Setup1 as @Setup(Trial)
+    participant Setup2 as @Setup(Invocation)
+    participant BM as @Benchmark
+
+    Runner->>JMH: 启动 Benchmark
+    JMH->>Fork: Fork 新 JVM (隔离状态)
+    Fork->>Setup1: 读取配置 (仅执行 1 次)
+    Note over Setup1: prefillOrders = 10000<br/>prefillPriceLevels = 100
+
+    loop 每次 Warmup / Measurement 迭代
+        loop 每次 Invocation
+            Fork->>Setup2: 创建引擎 + 预填充订单簿
+            Note over Setup2: new MatchEngine()<br/>prefillOrderBook()
+            Fork->>BM: 执行 @Benchmark (仅测这里)
+            Note over BM: engine.placeOrder(order)
+            BM-->>Fork: 返回结果
+        end
+    end
+    Fork-->>JMH: 汇总统计数据
+    JMH-->>Runner: 输出结果
+</div>
+
+<div class="callout callout-info">
+    <strong>关键设计：</strong>预填充订单簿的操作在 <code>@Setup(Level.Invocation)</code> 中完成，
+    不在 <code>@Benchmark</code> 方法内。这意味着 <strong>JMH 不会将预填充时间计入测量结果</strong>，
+    只测量真正的 <code>placeOrder</code> 调用。
+</div>
+
+<table class="table table-bordered table-sm">
+    <thead class="table-light"><tr><th>注解</th><th>执行时机</th><th>本项目用途</th></tr></thead>
+    <tbody>
+        <tr><td><code>@Setup(Level.Trial)</code></td><td>整个 Benchmark 开始前执行 1 次</td><td>读取 <code>BenchmarkConfig</code> 配置参数</td></tr>
+        <tr><td><code>@Setup(Level.Invocation)</code></td><td>每次 @Benchmark 方法调用前执行</td><td>创建新的 <code>MatchEngine</code> + 预填充订单簿</td></tr>
+        <tr><td><code>@Benchmark</code></td><td>被 JMH 反复调用并计时</td><td>只执行一笔 <code>placeOrder</code>，纯净测量</td></tr>
+    </tbody>
+</table>
+
+<!-- ==================== 四、撮合引擎流程 ==================== -->
+<h2 id="engine-flow" class="section-title">四、撮合引擎流程</h2>
+
+<h4 id="placeorder-flow">placeOrder 主流程</h4>
+<p><code>placeOrder(MatchOrder)</code> 是撮合引擎的唯一订单入口，根据订单类型和生效方式路由到不同的处理分支。</p>
+
+<div class="mermaid">
+flowchart TD
+    A["placeOrder(MatchOrder)"] --> B{"checkMatchConfig<br/>币对配置校验"}
+    B -- "配置无效" --> C["拒绝订单 return"]
+    B -- "配置有效" --> D["获取/创建 OrderBook"]
+    D --> E{"订单重复?<br/>isOrderExists()"}
+    E -- "是" --> F["reject() return"]
+    E -- "否" --> G{"订单类型?"}
+    G -- "LIMIT 限价单" --> H["processLimitOrder"]
+    G -- "MARKET 市价单" --> I["processMarketOrder"]
+
+    H --> J{"TimeInForce<br/>生效类型?"}
+    J -- "GTC" --> K["processGtcOrder"]
+    J -- "IOC" --> L["processIocOrder"]
+    J -- "FOK" --> M["processFokOrder"]
+    J -- "POST_ONLY" --> N["processPostOnlyOrder"]
+
+    K --> K1{"价格交叉?"}
+    K1 -- "否" --> K2["addOrder 挂单"]
+    K1 -- "是" --> K3["tryMatchInstantly"]
+    K3 --> K4["剩余量挂单"]
+
+    L --> L1{"价格交叉?"}
+    L1 -- "否" --> L2["cancel 撤单"]
+    L1 -- "是" --> L3["tryMatchInstantly"]
+    L3 --> L4{"完全成交?"}
+    L4 -- "否" --> L5["cancel 剩余撤单"]
+    L4 -- "是" --> L6["结束"]
+
+    M --> M1["FokOrderProcessor"]
+    M1 --> M2["Phase1 预撮合"]
+    M2 --> M3{"能完全成交?"}
+    M3 -- "否" --> M4["cancel 全部撤单"]
+    M3 -- "是" --> M5["Phase2 真实撮合"]
+
+    N --> N1{"价格交叉?"}
+    N1 -- "是" --> N2["cancel 撤单"]
+    N1 -- "否" --> N3["addOrder 挂单"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#dc3545,color:#fff
+    style F fill:#dc3545,color:#fff
+    style K2 fill:#198754,color:#fff
+    style K3 fill:#fd7e14,color:#fff
+    style L2 fill:#dc3545,color:#fff
+    style L5 fill:#dc3545,color:#fff
+    style M4 fill:#dc3545,color:#fff
+    style M5 fill:#fd7e14,color:#fff
+    style N2 fill:#dc3545,color:#fff
+    style N3 fill:#198754,color:#fff
+</div>
+
+<h4 id="match-flow">撮合核心流程 (tryMatchInstantly)</h4>
+<p>当订单价格与对手盘发生交叉时，引擎执行撮合。核心逻辑：按价格优先遍历对手盘，逐档逐单成交。</p>
+
+<div class="mermaid">
+flowchart TD
+    T1["tryMatchInstantly(newOrder, orderBook)"] --> T2["获取对手盘<br/>getOppositeBook()"]
+    T2 --> T3["迭代价格档位<br/>Iterator&lt;DepthLine&gt;"]
+    T3 --> T4{"档位为空?"}
+    T4 -- "是" --> T5["移除空档位<br/>continue"]
+    T4 -- "否" --> T6{"isCross<br/>价格交叉?"}
+    T6 -- "否" --> T7["break 停止撮合"]
+    T6 -- "是" --> T8["match(newOrder, depthLine)"]
+
+    T8 --> T9["遍历档位内订单"]
+    T9 --> T10{"STP 自成交<br/>保护检查"}
+    T10 -- "OP_BREAK" --> T11["终止撮合"]
+    T10 -- "OP_CONTINUE" --> T12["跳过当前订单"]
+    T10 -- "OP_NORMAL" --> T13["doMatch()<br/>执行成交"]
+    T13 --> T14{"taker<br/>完全成交?"}
+    T14 -- "是" --> T15["退出撮合"]
+    T14 -- "否" --> T9
+
+    T5 --> T3
+    T12 --> T9
+    T8 --> T16["clearEmptyDepthLine"]
+    T16 --> T17{"退出?"}
+    T17 -- "是" --> T18["清理 pendingRemoves"]
+    T17 -- "否" --> T3
+    T15 --> T18
+
+    style T1 fill:#0d6efd,color:#fff
+    style T13 fill:#198754,color:#fff
+    style T11 fill:#dc3545,color:#fff
+    style T7 fill:#6c757d,color:#fff
+</div>
+
+<h4 id="orderbook-struct">订单簿数据结构</h4>
+<div class="mermaid">
+classDiagram
+    class OrderBook {
+        -String symbol
+        -TreeMap buyOrders 买单簿_降序
+        -TreeMap sellOrders 卖单簿_升序
+        -Map orderMap 全局订单映射
+        +addOrder(MatchOrder)
+        +removeOrder(MatchOrder)
+        +isCross(MatchOrder) boolean
+        +getOppositeBook(MatchOrder) TreeMap
+        +getBestBidPrice() BigDecimal
+        +getBestAskPrice() BigDecimal
+    }
+
+    class DepthLine {
+        -BigDecimal price
+        -LinkedList orders 时间优先
+        +openOrder(MatchOrder)
+        +cancelOrder(MatchOrder)
+        +isEmpty() boolean
+    }
+
+    class MatchOrder {
+        -long orderId
+        -OrderType orderType
+        -OrderSideEnum orderSide
+        -TimeInForceEnum timeInForce
+        -BigDecimal delegatePrice
+        -BigDecimal delegateCount
+        -BigDecimal dealtCount
+        -OrderStatusEnum orderStatus
+        +getRemainingQuantity()
+        +updateFilledQuantity(qty)
+        +fullFilled() boolean
+    }
+
+    OrderBook "1" --> "*" DepthLine : 按价格排序
+    DepthLine "1" --> "*" MatchOrder : 按时间排序
+</div>
+
+<table class="table table-bordered table-sm mt-3">
+    <thead class="table-light"><tr><th>订单簿</th><th>排序</th><th>firstKey</th><th>设计意图</th></tr></thead>
+    <tbody>
+        <tr><td><code>buyOrders</code></td><td>降序 <code>reverseOrder()</code></td><td>最优买价（最高价）</td><td>买方出价越高越优先成交</td></tr>
+        <tr><td><code>sellOrders</code></td><td>升序（自然序）</td><td>最优卖价（最低价）</td><td>卖方出价越低越优先成交</td></tr>
+    </tbody>
+</table>
+
+<!-- ==================== 五、9 大测试场景 ==================== -->
+<h2 id="scenarios" class="section-title">五、9 大测试场景</h2>
+
+<p>每个场景覆盖 <code>placeOrder</code> 的不同代码路径，从最轻量到最重量排列：</p>
+
+<!-- 场景 1 -->
+<div id="s1" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">1</span> GTC 不交叉挂单 <span class="badge bg-success">O(log N)</span></h5>
+        <p>买单价格远低于卖盘最优价，不触发撮合，直接加入 TreeMap 订单簿。<strong>这是撮合引擎最快的路径。</strong></p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario1_GTC_NoMatch_AddToBook</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processGtcOrder &rarr; gtcNotCross()=true &rarr; addOrder()</td></tr>
+            <tr><th>复杂度</th><td>O(log N)，N 为当前价格档位数</td></tr>
+            <tr><th>真实场景</th><td>做市商铺单、用户挂远离盘口的限价单</td></tr>
+        </table>
+        <div class="mermaid">
+        flowchart LR
+            A["placeOrder"] --> B["processGtcOrder"] --> C{"gtcNotCross?"} -- "true" --> D["addOrder O(logN)"]
+            style D fill:#198754,color:#fff
+        </div>
+<pre><code>@Benchmark
+public void scenario1_GTC_NoMatch_AddToBook(Blackhole bh) {
+    MatchOrder order = OrderGenerator.limitBuy(BASE_PRICE - 500, DEFAULT_QTY, TimeInForceEnum.GTC);
+    engine.placeOrder(order);
+    bh.consume(order);
+}</code></pre>
+    </div>
+</div>
+
+<!-- 场景 2 -->
+<div id="s2" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">2</span> GTC 完全成交（单档位） <span class="badge bg-primary">O(M)</span></h5>
+        <p>买单价格等于卖盘最优价，与卖盘一笔订单完全成交。这是最基本的 taker 撮合路径。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario2_GTC_SingleMatch</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processGtcOrder &rarr; isCross=true &rarr; tryMatchInstantly &rarr; match &rarr; doMatch</td></tr>
+            <tr><th>复杂度</th><td>O(1) 成交 + O(log N) 清理</td></tr>
+            <tr><th>真实场景</th><td>普通用户吃单</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 3 -->
+<div id="s3" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">3</span> GTC 多档位成交 <span class="badge bg-warning text-dark">O(N*M)</span></h5>
+        <p>大单横扫 10 个价格档位，测量跨档位遍历撮合的性能开销。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario3_GTC_MultiLevelMatch</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processGtcOrder &rarr; tryMatchInstantly &rarr; [10 次 match] &rarr; doMatch(多次)</td></tr>
+            <tr><th>复杂度</th><td>O(N*M)，N=10 档位，M=每档位订单数</td></tr>
+            <tr><th>真实场景</th><td>大单扫盘、极端行情</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 4 -->
+<div id="s4" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">4</span> IOC 立即成交 <span class="badge bg-primary">O(M)</span></h5>
+        <p>IOC 订单立即撮合，剩余部分直接撤销（不挂单）。与 GTC 共享 <code>tryMatchInstantly</code> 路径。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario4_IOC_InstantMatch</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processIocOrder &rarr; isCross=true &rarr; tryMatchInstantly &rarr; cancel 剩余</td></tr>
+            <tr><th>复杂度</th><td>与 GTC 单档位成交接近</td></tr>
+            <tr><th>真实场景</th><td>要求立即成交的交易策略</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 5 -->
+<div id="s5" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">5</span> FOK 完全成交（两段式撮合） <span class="badge bg-danger">2x O(N*M)</span></h5>
+        <p>FOK 采用<strong>两段式撮合</strong>：先模拟遍历（Phase1）验证是否能完全成交，确认后才执行真实成交（Phase2）。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario5_FOK_FullFill</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processFokOrder &rarr; FokOrderProcessor.process &rarr; Phase1 &rarr; Phase2</td></tr>
+            <tr><th>复杂度</th><td>约为 GTC 同等成交量的 <strong>2 倍</strong>（双重遍历）</td></tr>
+            <tr><th>真实场景</th><td>要求全量成交或完全放弃的确定性交易</td></tr>
+        </table>
+        <div class="mermaid">
+        flowchart LR
+            A["FOK placeOrder"] --> B["Phase1 预撮合<br/>(深拷贝+模拟)"]
+            B --> C{"能完全成交?"}
+            C -- "是" --> D["Phase2 真实撮合"]
+            C -- "否" --> E["cancel 全部撤单"]
+            style D fill:#198754,color:#fff
+            style E fill:#dc3545,color:#fff
+        </div>
+    </div>
+</div>
+
+<!-- 场景 6 -->
+<div id="s6" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">6</span> FOK 撤单（预撮合失败） <span class="badge bg-secondary">O(N*M)</span></h5>
+        <p>FOK 数量超过对手盘总量，预撮合发现无法完全成交，直接撤单。只执行 Phase1，不执行 Phase2。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario6_FOK_Cancel</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processFokOrder &rarr; Phase1(遍历全部对手盘，判定失败) &rarr; cancel</td></tr>
+            <tr><th>复杂度</th><td>约为 FOK 完全成交的 50%（只有 Phase1）</td></tr>
+            <tr><th>真实场景</th><td>流动性不足时的 FOK 订单</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 7 -->
+<div id="s7" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">7</span> POST_ONLY 挂单 <span class="badge bg-success">O(log N)</span></h5>
+        <p>POST_ONLY 订单只做 maker。价格不交叉时直接挂入订单簿，是最轻量的处理路径。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario7_PostOnly_AddToBook</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processPostOnlyOrder &rarr; isCross=false &rarr; addOrder</td></tr>
+            <tr><th>复杂度</th><td>O(log N)</td></tr>
+            <tr><th>真实场景</th><td>做市商批量铺单</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 8 -->
+<div id="s8" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">8</span> 深度订单簿扫盘（压力测试） <span class="badge bg-danger">O(N*M)</span></h5>
+        <p>模拟极端行情：一笔大单扫光整个卖盘。这是撮合引擎的<strong>最坏情况</strong>。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario8_DeepBook_FullSweep</code></td></tr>
+            <tr><th>代码路径</th><td>placeOrder &rarr; processGtcOrder &rarr; tryMatchInstantly &rarr; [遍历全部档位] &rarr; match(全量)</td></tr>
+            <tr><th>复杂度</th><td>O(N*M)，N=全部价格档位数，M=每档位订单数</td></tr>
+            <tr><th>真实场景</th><td>市场崩盘、巨量市价单</td></tr>
+        </table>
+    </div>
+</div>
+
+<!-- 场景 9 -->
+<div id="s9" class="card card-scenario mb-3">
+    <div class="card-body">
+        <h5 class="card-title"><span class="step-num">9</span> 混合场景（综合吞吐量） <span class="badge bg-info text-dark">综合</span></h5>
+        <p>随机生成 4 种订单类型，模拟真实交易环境的混合工作负载。</p>
+        <table class="table table-sm table-bordered mb-2">
+            <tr><th width="120">方法名</th><td><code>scenario9_MixedWorkload</code></td></tr>
+            <tr><th>订单分布</th><td>GTC 挂单 25% | GTC 成交 25% | IOC 成交 25% | POST_ONLY 25%</td></tr>
+            <tr><th>复杂度</th><td>各场景加权平均</td></tr>
+            <tr><th>真实场景</th><td>正常交易时段的综合负载</td></tr>
+        </table>
+        <div class="mermaid">
+        pie title 混合场景订单分布
+            "GTC 挂单 (不交叉)" : 25
+            "GTC 成交 (交叉)" : 25
+            "IOC 成交 (交叉)" : 25
+            "POST_ONLY 挂单" : 25
+        </div>
+    </div>
+</div>
+
+<!-- ==================== 六、配置参数 ==================== -->
+<h2 id="config" class="section-title">六、配置参数</h2>
+
+<p>所有参数均通过 JVM 系统属性 (<code>-D</code>) 配置，未设置时使用默认值。</p>
+
+<table class="table table-bordered config-table">
+    <thead class="table-light">
+        <tr><th>系统属性</th><th>说明</th><th>默认值</th><th>示例</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>benchmark.prefill.orders</td>
+            <td>预填充订单总数（买卖各一半，分布在多个价格档位上）</td>
+            <td>10000</td>
+            <td><code>-Dbenchmark.prefill.orders=5000</code></td>
+        </tr>
+        <tr>
+            <td>benchmark.prefill.priceLevels</td>
+            <td>价格档位数（数值越大，价格越分散）</td>
+            <td>100</td>
+            <td><code>-Dbenchmark.prefill.priceLevels=50</code></td>
+        </tr>
+        <tr>
+            <td>benchmark.warmup.iterations</td>
+            <td>JMH 预热迭代次数（让 JIT 编译充分优化后再测量）</td>
+            <td>3</td>
+            <td><code>-Dbenchmark.warmup.iterations=5</code></td>
+        </tr>
+        <tr>
+            <td>benchmark.measurement.iterations</td>
+            <td>JMH 正式测量迭代次数</td>
+            <td>5</td>
+            <td><code>-Dbenchmark.measurement.iterations=10</code></td>
+        </tr>
+        <tr>
+            <td>benchmark.forks</td>
+            <td>JMH Fork 次数（每次 Fork 启动全新 JVM，结果更可信）</td>
+            <td>1</td>
+            <td><code>-Dbenchmark.forks=2</code></td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="callout callout-warn">
+    <strong>提示：</strong>预填充订单数越大，<code>@Setup(Level.Invocation)</code> 的准备时间越长。
+    首次运行建议使用默认值，确认正常后再逐步增大。
+</div>
+
+<h5>预填充订单簿的价格布局</h5>
+<div class="mermaid">
+graph LR
+    subgraph "卖盘 sellOrders (升序)"
+        S1["49101"] --> S2["49102"] --> S3["..."] --> S4["49200"]
+    end
+    subgraph "Spread 无订单区"
+        SP["49001 ~ 49100"]
+    end
+    subgraph "买盘 buyOrders (降序)"
+        B1["49000"] --> B2["48999"] --> B3["..."] --> B4["48901"]
+    end
+    style SP fill:#fff3cd,color:#856404
+</div>
+
+<!-- ==================== 七、运行指南 ==================== -->
+<h2 id="run-guide" class="section-title">七、运行指南</h2>
+
+<h4 id="run-ide"><span class="step-num">1</span> IDE 直接运行（推荐新手）</h4>
+<ol>
+    <li>在 IDE 中打开 <code>MatchEngineBenchmarkRunner.java</code></li>
+    <li>右键 &rarr; Run <code>main()</code> 方法</li>
+    <li>（可选）在 VM Options 中添加 <code>-D</code> 参数：
+<pre><code>-Dbenchmark.prefill.orders=5000 -Dbenchmark.prefill.priceLevels=50</code></pre>
+    </li>
+</ol>
+
+<h4 id="run-maven"><span class="step-num">2</span> Maven 命令行运行</h4>
+<pre><code># 使用默认配置运行
+mvn test-compile exec:java \
+    -Dexec.mainClass="com.laser.exchange.matching.benchmark.MatchEngineBenchmarkRunner" \
+    -Dexec.classpathScope="test"
+
+# 自定义预填充订单数和价格档位数
+mvn test-compile exec:java \
+    -Dexec.mainClass="com.laser.exchange.matching.benchmark.MatchEngineBenchmarkRunner" \
+    -Dexec.classpathScope="test" \
+    -Dbenchmark.prefill.orders=5000 \
+    -Dbenchmark.prefill.priceLevels=50</code></pre>
+
+<h5>运行输出</h5>
+<ul>
+    <li><strong>控制台</strong>：实时输出每个场景的 Throughput (ops/us) 和 Average Time (us/op)</li>
+    <li><strong>JSON 文件</strong>：<code>benchmark-result.json</code>，可导入 <a href="https://jmh.morethan.io/" target="_blank">JMH Visualizer</a> 可视化分析</li>
+</ul>
+
+<!-- ==================== 八、解读结果 ==================== -->
+<h2 id="read-result" class="section-title">八、解读结果</h2>
+
+<p>JMH 输出两种测量模式的结果：</p>
+
+<table class="table table-bordered">
+    <thead class="table-light">
+        <tr><th>指标</th><th>含义</th><th>单位</th><th>越大/小越好</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Throughput</strong></td><td>每微秒完成的操作数</td><td>ops/us</td><td>越大越好</td></tr>
+        <tr><td><strong>Average Time</strong></td><td>单次操作的平均耗时</td><td>us/op</td><td>越小越好</td></tr>
+    </tbody>
+</table>
+
+<h5>控制台输出示例</h5>
+<pre><code>Benchmark                                         Mode  Cnt    Score    Error   Units
+MatchEngineBenchmark.scenario1_GTC_NoMatch       thrpt    5    2.145 ±  0.087  ops/us
+MatchEngineBenchmark.scenario2_GTC_SingleMatch   thrpt    5    1.832 ±  0.064  ops/us
+MatchEngineBenchmark.scenario7_PostOnly          thrpt    5    2.201 ±  0.091  ops/us
+MatchEngineBenchmark.scenario8_DeepBook          thrpt    5    0.003 ±  0.001  ops/us
+
+MatchEngineBenchmark.scenario1_GTC_NoMatch        avgt    5    0.466 ±  0.019  us/op
+MatchEngineBenchmark.scenario2_GTC_SingleMatch    avgt    5    0.546 ±  0.023  us/op
+MatchEngineBenchmark.scenario8_DeepBook            avgt    5  312.847 ± 12.654  us/op</code></pre>
+
+<div class="callout callout-info">
+    <strong>解读要点：</strong><br/>
+    &bull; <code>±</code> 后面的数值是误差范围（99.9% 置信区间），数值越小结果越稳定<br/>
+    &bull; 场景 1/7（挂单）应该最快，场景 8（全盘扫描）最慢<br/>
+    &bull; 场景 5 (FOK 完全成交) 应该约为场景 2 的 2 倍耗时（两段式撮合）
+</div>
+
+<!-- ==================== 九、复杂度分析 ==================== -->
+<h2 id="complexity" class="section-title">九、复杂度分析</h2>
+
+<table class="table table-bordered">
+    <thead class="table-light">
+        <tr><th>操作</th><th>时间复杂度</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>配置校验 / 重复检查</td><td>O(1)</td><td>HashMap 查询</td></tr>
+        <tr><td>价格交叉判断</td><td>O(1)</td><td>TreeMap.firstKey()</td></tr>
+        <tr><td>挂单 (addOrder)</td><td>O(log N)</td><td>TreeMap 插入，N = 价格档位数</td></tr>
+        <tr><td>单次成交 (doMatch)</td><td>O(1)</td><td>数值运算和状态更新</td></tr>
+        <tr><td>单档位撮合 (match)</td><td>O(M)</td><td>M = 该档位订单数</td></tr>
+        <tr><td>完整撮合 (tryMatchInstantly)</td><td>O(N*M)</td><td>N = 穿越的档位数</td></tr>
+        <tr><td>FOK 两段式撮合</td><td>2 &times; O(N*M)</td><td>预撮合 + 真实撮合</td></tr>
+    </tbody>
+</table>
+
+<div class="mermaid">
+graph LR
+    subgraph "性能从优到劣"
+        A["POST_ONLY / GTC<br/>不交叉挂单<br/>O(log N)"] --> B["GTC / IOC<br/>单档位成交<br/>O(M)"]
+        B --> C["GTC<br/>多档位成交<br/>O(N×M)"]
+        C --> D["FOK<br/>两段式撮合<br/>2×O(N×M)"]
+    end
+    style A fill:#198754,color:#fff
+    style B fill:#0d6efd,color:#fff
+    style C fill:#fd7e14,color:#fff
+    style D fill:#dc3545,color:#fff
+</div>
+
+<!-- ==================== 十、常见问题 ==================== -->
+<h2 id="faq" class="section-title">十、常见问题</h2>
+
+<div class="accordion" id="faqAccordion">
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#faq1">Benchmark 跑了很久不出结果？</button></h2>
+        <div id="faq1" class="accordion-collapse collapse show" data-bs-parent="#faqAccordion">
+            <div class="accordion-body">
+                <p>可能原因：<code>prefillOrders</code> 设置过大（如 100000），每次 invocation 都要预填充大量订单。</p>
+                <p><strong>解决方案：</strong>减小 <code>-Dbenchmark.prefill.orders</code> 的值（建议 1000~10000），或减少 <code>warmupIterations</code> 和 <code>measurementIterations</code>。</p>
+            </div>
+        </div>
+    </div>
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq2">为什么使用 Level.Invocation 而不是 Level.Iteration？</button></h2>
+        <div id="faq2" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+            <div class="accordion-body">
+                <p>撮合引擎的特殊性：每次 <code>placeOrder</code> 都会修改订单簿状态（成交、移除订单等）。如果使用 <code>Level.Iteration</code>，第一次调用后订单簿已被修改，后续调用的测量结果不准确。</p>
+                <p><code>Level.Invocation</code> 确保每次测量都在干净的订单簿上进行，结果更可信。</p>
+            </div>
+        </div>
+    </div>
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq3">forks 设为 0 可以加快速度吗？</button></h2>
+        <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+            <div class="accordion-body">
+                <p>可以，但<strong>不推荐</strong>。<code>forks=0</code> 在当前 JVM 中运行，JIT 编译状态、GC 堆布局都可能影响结果。仅建议在调试 Benchmark 代码本身时使用 <code>forks=0</code>，正式评估请使用 <code>forks&ge;1</code>。</p>
+            </div>
+        </div>
+    </div>
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq4">如何只运行某一个场景？</button></h2>
+        <div id="faq4" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+            <div class="accordion-body">
+                <p>修改 <code>MatchEngineBenchmarkRunner</code> 中的 <code>.include()</code> 参数：</p>
+<pre><code>// 只运行场景 1
+.include("MatchEngineBenchmark.scenario1")
+
+// 运行场景 1 和场景 2
+.include("MatchEngineBenchmark.scenario[12]")</code></pre>
+                <p><code>include</code> 接受正则表达式，可以灵活匹配方法名。</p>
+            </div>
+        </div>
+    </div>
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq5">如何可视化 benchmark-result.json？</button></h2>
+        <div id="faq5" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+            <div class="accordion-body">
+                <p>打开 <a href="https://jmh.morethan.io/" target="_blank">https://jmh.morethan.io/</a>，将 <code>benchmark-result.json</code> 文件拖入页面，即可生成交互式图表。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<hr class="mt-5">
+<p class="text-muted text-center"><small>Laser Matching Engine Benchmark 使用手册 | laser-matching-engine</small></p>
+
+</div><!-- /main-content -->
+
+<!-- ==================== JavaScript ==================== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+
+    const btnTop = document.getElementById('btnTop');
+    window.addEventListener('scroll', () => {
+        btnTop.style.display = window.scrollY > 300 ? 'flex' : 'none';
+    });
+
+    const sections = document.querySelectorAll('[id]');
+    const navLinks = document.querySelectorAll('.sidebar .nav-link');
+    window.addEventListener('scroll', () => {
+        let current = '';
+        sections.forEach(section => {
+            const top = section.offsetTop - 100;
+            if (window.scrollY >= top) current = section.getAttribute('id');
+        });
+        navLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + current) link.classList.add('active');
+        });
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Laser 撮合引擎 — Sprint 3 端到端测试报告</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <style>
+        body { padding-top: 4.5rem; }
+        #sidebar { position: fixed; top: 4.5rem; bottom: 0; left: 0; width: 260px;
+            padding: 1rem; overflow-y: auto; border-right: 1px solid #dee2e6; background: #f8f9fa; }
+        #content { margin-left: 280px; padding: 1rem 2rem; max-width: 1040px; }
+        pre { background: #f6f8fa; padding: .6rem .9rem; border-radius: .375rem; font-size: .85rem; overflow-x: auto; }
+        .mermaid { background: #fff; padding: .5rem; border: 1px solid #e9ecef; border-radius: .375rem; }
+        #backToTop { position: fixed; bottom: 1.5rem; right: 1.5rem; display: none; z-index: 1030; }
+        .pass { color: #198754; font-weight: 600; }
+        .fail { color: #dc3545; font-weight: 600; }
+        table { font-size: .92rem; }
+        h2 { margin-top: 2.5rem; padding-top: 4.5rem; margin-top: -1rem; }
+        .evidence-log { background: #1e1e1e; color: #d4d4d4; padding: .6rem 1rem; border-radius: .375rem; font-size: .82rem; overflow-x: auto; }
+    </style>
+</head>
+<body data-bs-spy="scroll" data-bs-target="#sidebar" data-bs-offset="80">
+
+<nav class="navbar fixed-top navbar-light bg-light border-bottom">
+    <div class="container-fluid">
+        <span class="navbar-brand h1">🧪 Sprint 3 端到端测试报告 · 3 节点 Raft 集群 · MDC 广播 · 快照恢复</span>
+    </div>
+</nav>
+
+<aside id="sidebar">
+    <nav class="nav flex-column">
+        <a class="nav-link" href="#overview">1. 概览</a>
+        <a class="nav-link" href="#env">2. 测试环境</a>
+        <a class="nav-link" href="#arch">3. 架构拓扑</a>
+        <a class="nav-link" href="#case1">4. 定时快照测试</a>
+        <a class="nav-link" href="#case2">5. 手动快照测试</a>
+        <a class="nav-link" href="#case3">6. MDC 端到端测试</a>
+        <a class="nav-link" href="#case4">7. 3节点复制验证</a>
+        <a class="nav-link" href="#case5">8. 快照+replay 恢复</a>
+        <a class="nav-link" href="#decouple">9. 依赖解耦重构</a>
+        <a class="nav-link" href="#regression">10. 回归测试</a>
+        <a class="nav-link" href="#summary">11. 结论</a>
+    </nav>
+</aside>
+
+<main id="content">
+
+<h2 id="overview">1. 概览</h2>
+<p>本报告记录 Sprint 3 端到端测试全链路。目标：
+<strong>3 节点 Aeron Raft 集群 + 定时快照 + 手动快照 + MatchResult MDC 广播 + 快照恢复 + raftlog 回放</strong> 全部打通。</p>
+
+<table class="table table-bordered">
+    <thead class="table-light"><tr><th>测试项</th><th>关键指标</th><th>结果</th></tr></thead>
+    <tbody>
+    <tr><td>定时快照 (10s 周期)</td><td>至少 3 次成功触发</td><td class="pass">PASS (4 次连续成功)</td></tr>
+    <tr><td>手动快照 HTTP 接口</td><td>LEADER 返回 200, FOLLOWER 返回 423</td><td class="pass">PASS</td></tr>
+    <tr><td>cluster.sh snapshot 命令</td><td>新增 CLI 工具</td><td class="pass">PASS</td></tr>
+    <tr><td>MDC 广播端到端</td><td>订单 → 撮合 → 广播 → 客户端解码</td><td class="pass">PASS (10+ 单 100% 送达)</td></tr>
+    <tr><td>3 节点状态机复制</td><td>LEADER+2 FOLLOWER 均处理同一 request</td><td class="pass">PASS</td></tr>
+    <tr><td>3 节点快照一致性</td><td>3 节点 takenAt / maxReq / maxRes 完全一致</td><td class="pass">PASS</td></tr>
+    <tr><td>kill-restart 恢复</td><td>load snapshot + replay raftlog</td><td class="pass">PASS (maxReq 10→20)</td></tr>
+    <tr><td>Raft 重新选举</td><td>重启后选出新 LEADER</td><td class="pass">PASS (LEADER node-1 → node-2)</td></tr>
+    <tr><td>依赖解耦重构</td><td>无 Circular Bean</td><td class="pass">PASS</td></tr>
+    <tr><td>189 单元测试回归</td><td>0 failure</td><td class="pass">PASS</td></tr>
+    </tbody>
+</table>
+
+<h2 id="env">2. 测试环境</h2>
+<table class="table table-sm">
+    <tbody>
+    <tr><td>JDK</td><td>OpenJDK 17.0.17</td></tr>
+    <tr><td>Spring Boot</td><td>3.4.5</td></tr>
+    <tr><td>Aeron</td><td>1.49.3</td></tr>
+    <tr><td>Agrona</td><td>2.3.0</td></tr>
+    <tr><td>OS</td><td>Darwin 25.3.0 (macOS)</td></tr>
+    <tr><td>Cluster 拓扑</td><td>3 节点单机部署 (node-0/1/2)</td></tr>
+    <tr><td>HTTP 端口</td><td>node-0=8080, node-1=8081, node-2=8082</td></tr>
+    <tr><td>Cluster ingress 端口</td><td>9000/9001/9002</td></tr>
+    <tr><td>MDC control 端口</td><td>40456/40457/40458 (base+nodeId)</td></tr>
+    <tr><td>mock-counter 订阅端口</td><td>40500/40501/40502 (subscriber-base+nodeId)</td></tr>
+    </tbody>
+</table>
+
+<h2 id="arch">3. 架构拓扑</h2>
+<div class="mermaid">
+flowchart TB
+  subgraph Client["laser-mock-counter"]
+    Gen[RequestSerialNumGenerator]
+    API[REST API :10880]
+    Sub[ResultMdcSubscriber<br/>订阅 40456/57/58]
+  end
+
+  subgraph Cluster["3-Node Aeron Cluster"]
+    N0["node-0 :8080<br/>FOLLOWER"]
+    N1["node-1 :8081<br/>LEADER"]
+    N2["node-2 :8082<br/>FOLLOWER"]
+  end
+
+  subgraph N1Detail["LEADER 内部"]
+    CD[CommandDispatcher]
+    ME[MatchEngine]
+    EH[EventsHelper]
+    RH[ClusterRoleHolder]
+    Repo[ArchiveResultRepository]
+    MDC[ResultMdcBroadcaster<br/>只 LEADER 广播]
+  end
+
+  API -->|SBE request| Cluster
+  Cluster -->|raft 复制| N0
+  Cluster -->|raft 复制| N2
+  N1 --- N1Detail
+  CD --> ME
+  ME --> EH
+  CD --> Repo
+  CD -->|isLeader?| RH
+  CD -.->|如果 LEADER| MDC
+  MDC -->|UDP MDC| Sub
+  N0 -.->|all 节点持久化| Repo
+  N2 -.->|all 节点持久化| Repo
+</div>
+
+<h2 id="case1">4. 用例 #1 — 定时快照 (10s 周期)</h2>
+
+<h3>4.1 配置</h3>
+<pre><code>laser.matching.snapshot.scheduler-enabled=true
+laser.matching.snapshot.interval-ms=10000        # 验证期设 10s，验证后改回 300000
+laser.matching.snapshot.initial-delay-ms=15000</code></pre>
+
+<h3>4.2 操作步骤</h3>
+<ol>
+    <li>启动单节点 <code>./cluster.sh start-single</code></li>
+    <li>等待 15s 首次触发 + 30s 观察周期</li>
+    <li><code>grep SnapshotScheduler /tmp/laser/logs/node-0.log</code></li>
+</ol>
+
+<h3>4.3 证据日志</h3>
+<pre class="evidence-log">16:40:01 SnapshotScheduler triggering snapshot via ClusterTool dir=/tmp/laser/node-0/consensus
+16:40:01 MatchEngineClusteredService onTakeSnapshot begin, takenAt=1777020001141, maxReq=0, maxRes=0
+16:40:01 SnapshotManager takeSnapshot done, entries=3, maxReq=0, maxRes=0
+16:40:01 SnapshotScheduler snapshot triggered, ok=true, output=Member [0]: SNAPSHOT applied successfully
+16:40:11 (第二轮) ... SNAPSHOT applied successfully
+16:40:21 (第三轮) ... SNAPSHOT applied successfully
+16:40:31 (第四轮) ... SNAPSHOT applied successfully</pre>
+
+<h3>4.4 结论</h3>
+<p class="pass">✅ 10s 间隔稳定触发 4 次，全部 <code>SNAPSHOT applied successfully</code>。验证后已将 <code>interval-ms</code> 改回生产值 <code>300000</code>。</p>
+
+<h2 id="case2">5. 用例 #2 — 手动快照 HTTP 接口</h2>
+
+<h3>5.1 操作</h3>
+<pre><code># 方式 A: 直接 curl
+curl -X POST http://localhost:8080/snapshot/trigger
+
+# 方式 B: 新增的 cluster.sh 命令 (本 Sprint 新增)
+./cluster.sh snapshot        # 默认对 node-0 触发
+./cluster.sh snapshot 1      # 对 node-1 (LEADER) 触发
+./cluster.sh help            # 已更新，列出 snapshot 命令</code></pre>
+
+<h3>5.2 LEADER 响应 (HTTP 200)</h3>
+<pre class="evidence-log">{
+  "output": "Member [1]: SNAPSHOT applied successfully",
+  "role": "LEADER",
+  "success": true,
+  "memberId": 1
+}</pre>
+
+<h3>5.3 FOLLOWER 保护 (HTTP 423 LOCKED)</h3>
+<p>对非 LEADER 节点触发会返回 <code>HTTP 423 LOCKED</code>，message: <code>only leader can take snapshot</code>。避免 FOLLOWER 节点误触发导致数据不一致。</p>
+
+<h3>5.4 结论</h3>
+<p class="pass">✅ HTTP 接口 + CLI 工具双通道就绪，角色校验生效。</p>
+
+<h2 id="case3">6. 用例 #3 — MDC 广播端到端</h2>
+
+<h3>6.1 架构</h3>
+<div class="mermaid">
+sequenceDiagram
+    participant Cli as mock-counter
+    participant L as LEADER (node-1)
+    participant F0 as FOLLOWER (node-0)
+    participant F2 as FOLLOWER (node-2)
+    participant Sub as ResultMdcSubscriber
+
+    Cli->>L: place order (serialNum=N)
+    L->>L: 撮合 + 生成 MatchResult
+    L->>F0: raft log replicate
+    L->>F2: raft log replicate
+    par 全部节点持久化
+        L->>L: persist to archive
+        F0->>F0: persist to archive
+        F2->>F2: persist to archive
+    end
+    L-->>Sub: MDC publish (只有 LEADER)
+    Note over F0,F2: FOLLOWER 不广播
+    Sub->>Cli: decode + log [MDC-RESULT]
+</div>
+
+<h3>6.2 证据</h3>
+<pre class="evidence-log"># 服务端 LEADER
+16:39:46 ResultMdcBroadcaster publisher initialized channel=aeron:udp?control=localhost:40457|control-mode=dynamic, streamId=1002
+
+# 客户端
+[MDC-RESULT #1] PLACE resultSerialNum=1, reqSerialNum=1, orderId=..., status=NEW
+[MDC-RESULT #2] PLACE resultSerialNum=2, reqSerialNum=2, orderId=..., status=NEW
+...
+[MDC-RESULT #5] PLACE resultSerialNum=5, reqSerialNum=5, orderId=..., status=NEW</pre>
+
+<h3>6.3 结论</h3>
+<p class="pass">✅ 5 单发送 → 5 个 MDC-RESULT 日志对齐，resultSerialNum 严格 +1。FOLLOWER 未广播（日志零 MdcBroadcaster 行）。</p>
+
+<h2 id="case4">7. 用例 #4 — 3 节点 Raft 复制验证</h2>
+
+<h3>7.1 操作</h3>
+<pre><code>./cluster.sh start-all
+# 等待 Raft 选举
+./cluster.sh status    # LEADER=node-1, FOLLOWER=node-0/2
+for i in 1..10 do place order; done</code></pre>
+
+<h3>7.2 各节点收到同一 serialNum 的证据</h3>
+<pre class="evidence-log">LEADER (node-1) handlePlace:
+  serial=8  serial=9  serial=10
+
+FOLLOWER (node-0) handlePlace 副本:
+  serial=8  serial=9  serial=10    ← 状态机复制
+
+FOLLOWER (node-2) handlePlace 副本:
+  serial=8  serial=9  serial=10    ← 状态机复制</pre>
+
+<h3>7.3 3 节点快照一致性</h3>
+<pre class="evidence-log"># 触发 snapshot
+node-0: onTakeSnapshot begin, takenAt=1777024223606, maxReq=10, maxRes=10
+node-1: onTakeSnapshot begin, takenAt=1777024223606, maxReq=10, maxRes=10
+node-2: onTakeSnapshot begin, takenAt=1777024223606, maxReq=10, maxRes=10</pre>
+
+<h3>7.4 结论</h3>
+<p class="pass">✅ 3 节点完全同步 — serialNum/takenAt/maxReq/maxRes bit-for-bit 一致。共识时间戳确定性工作。</p>
+
+<h2 id="case5">8. 用例 #5 — 快照恢复 + raftlog 回放</h2>
+
+<h3>8.1 测试脚本</h3>
+<ol>
+    <li>干净启动 3 节点</li>
+    <li><strong>Phase A</strong>: 下 10 单 (serialNum 1-10)</li>
+    <li>手动触发 snapshot → 快照 maxReq=10, maxRes=10</li>
+    <li><strong>Phase B</strong>: 再下 10 单 (serialNum 11-20)<br/>
+        <em>关键</em>: 此时 scheduled snapshot 已关闭，11-20 只在 raftlog 不在快照</li>
+    <li><strong>Kill 全部 3 节点</strong></li>
+    <li><strong>restart-all</strong> → 观察 snapshot 加载 + raftlog replay</li>
+</ol>
+
+<h3>8.2 恢复日志 - 全 3 节点</h3>
+<pre class="evidence-log">=== snapshot 加载 ===
+node-0  [SerialNumValidator] restore lastSerialNum from 0 to 10
+node-0  [EventsHelper] restore nextResultSerialNum from 1 to 11
+node-0  [SnapshotManager] loadSnapshot done, entries=15, maxReq=10, maxRes(snap)=10
+
+node-1  restore lastSerialNum 0→10, nextResultSerialNum 1→11
+node-2  restore lastSerialNum 0→10, nextResultSerialNum 1→11 (随后成为 LEADER)
+
+=== raftlog replay 后 handlePlace 完整序列 (3 节点对照) ===
+node-0:  11 12 13 14 15 16 17 18 19 20
+node-1:  11 12 13 14 15 16 17 18 19 20
+node-2:  11 12 13 14 15 16 17 18 19 20</pre>
+
+<h3>8.3 关键观察</h3>
+<ol>
+    <li><strong>snapshot load</strong>：3 节点都从 <code>maxReq=0</code> 恢复到 <code>maxReq=10</code>（来自快照）</li>
+    <li><strong>raftlog replay</strong>：3 节点都重新处理 <strong>serialNum 11-20 完整 10 条</strong>，零丢失</li>
+    <li><strong>状态机确定性</strong>：3 节点 replay 顺序一致，最终状态一致</li>
+    <li><strong>持久化独立于 MDC</strong>：所有节点都走 <code>resultRepository.persist()</code>；只有 LEADER 广播</li>
+</ol>
+
+<h3>8.4 为什么能保证零丢失？不需要显式"等待处理完再快照"</h3>
+
+<p>用户合理地提出担忧：<em>"如果快照时有请求正在处理怎么办？会不会丢失 11 和 12？"</em></p>
+
+<p><strong>底层逻辑</strong>：Aeron Cluster 的状态机设计从根本上消除了这个问题：</p>
+
+<table class="table table-sm table-bordered">
+    <thead><tr><th>设计点</th><th>天然保证</th></tr></thead>
+    <tbody>
+    <tr><td>状态机单线程</td><td><code>clustered-service-0-0</code> 一个线程串行处理 <code>onSessionMessage</code> 和 <code>onTakeSnapshot</code>，永远不会并发</td></tr>
+    <tr><td>快照触发时机</td><td>只在"两条 onSessionMessage 之间"调度，绝不会抢占进行中的请求</td></tr>
+    <tr><td>快照边界精确</td><td><code>maxReq/maxRes</code> 反映调用那一刻的已完成状态，不存在"处理到一半"的中间态</td></tr>
+    <tr><td>raftlog 拼接</td><td>snapshot 之后的每一条 committed log 都会在重启时 100% replay</td></tr>
+    </tbody>
+</table>
+
+<p><strong>实测证据</strong>：Phase A+B 发 1-20 → snapshot 边界精确在 maxReq=10 → replay 出完整 11-20 → 最终处理序列 1-20，严格连续无丢失。</p>
+
+<p><strong>注</strong>：本测试报告的早期版本曾误判 serialNum 11/12 丢失，实际是日志截断导致的视觉假象。结论经复测完整修正。</p>
+
+<h3>8.5 结论</h3>
+<p class="pass">✅ 快照 + raftlog 回放机制完整工作，状态机确定性重演。</p>
+
+<h2 id="decouple">9. 依赖解耦重构 (Sprint 3 质量提升)</h2>
+
+<h3>9.1 问题</h3>
+<p>初版 CommandDispatcher 为判断 <code>isLeader()</code>，直接注入 <code>MatchEngineClusteredService</code>。启动时报错：</p>
+<pre class="evidence-log">The dependencies of some of the beans in the application context form a cycle:
+
+   clusterNodeBoot
+┌─────┐
+|  matchEngineClusteredService
+↑     ↓
+|  commandDispatcher
+└─────┘</pre>
+
+<h3>9.2 底层逻辑</h3>
+<p>CommandDispatcher 只用 ClusteredService 一个方法 <code>isLeader()</code>，却注入整个 bean — 违反<strong>接口隔离原则</strong>。</p>
+
+<h3>9.3 重构：抽出 ClusterRoleHolder</h3>
+<div class="mermaid">
+flowchart LR
+  subgraph before["重构前 (循环)"]
+    CS1[ClusteredService]
+    CD1[CommandDispatcher]
+    CS1 <-->|互相持有| CD1
+  end
+  subgraph after["重构后 (单向)"]
+    CS2[ClusteredService] -->|写| RH[ClusterRoleHolder]
+    CS2 -->|调用| CD2[CommandDispatcher]
+    CD2 -->|读| RH
+    SS[SnapshotScheduler] -->|读| RH
+    SC[SnapshotController] -->|读| RH
+  end
+</div>
+
+<h3>9.4 成果</h3>
+<ul>
+    <li>无 Spring circular dependency 异常</li>
+    <li>SnapshotScheduler / SnapshotController 也统一使用 RoleHolder 查询角色</li>
+    <li>编码时不再体现双向依赖，符合 owner 意识</li>
+</ul>
+
+<h2 id="regression">10. 单元测试回归</h2>
+<pre><code>$ mvn test
+[INFO] Tests run: 189, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS</code></pre>
+<p>所有 Sprint 1 + Sprint 2 既有测试全绿，未因 Sprint 3 改动引入回归。</p>
+
+<h2 id="summary">11. 结论与后续建议</h2>
+
+<h3>11.1 闭环成果</h3>
+<table class="table table-sm table-bordered">
+    <thead class="table-light"><tr><th>维度</th><th>交付</th></tr></thead>
+    <tbody>
+    <tr><td>新增代码</td><td>ResultMdcBroadcaster / Holder / Subscriber / ClusterRoleHolder</td></tr>
+    <tr><td>改造代码</td><td>CommandDispatcher (MDC 接入) / ClusteredService (broadcaster init + roleHolder update) / SnapshotScheduler / SnapshotController (roleHolder 替换)</td></tr>
+    <tr><td>脚本增强</td><td>cluster.sh snapshot 命令 + help 更新</td></tr>
+    <tr><td>配置</td><td>base-port + nodeId 机制，支持 3 节点共机无冲突部署</td></tr>
+    <tr><td>测试验证</td><td>3 节点真实集群 + kill/restart + 10s 定时快照 + 手动快照 + MDC e2e</td></tr>
+    </tbody>
+</table>
+
+<h3>11.2 已知局限 (Sprint 4 候选)</h3>
+<ol>
+    <li>mock-counter 重启后 <code>RequestSerialNumGenerator</code> 从 0 起，与服务端 <code>lastSerialNum</code> 不对齐 → 需要查询/持久化机制</li>
+    <li>MDC 广播当前是 <strong>live broadcast</strong>，未实现真正"从 archive replay 出来"的异步模式 (适合历史回查场景)</li>
+    <li>LEADER 切换时 mock-counter 订阅不会自动重平衡（已通过并行订阅 3 端口规避，但在动态拓扑场景需要更精细策略）</li>
+    <li>V1 (long) 撮合引擎的 MatchResult 生成未集成 (仅 V0 集成)</li>
+</ol>
+
+<h3>11.3 生产配置 checklist</h3>
+<ul>
+    <li>✅ <code>scheduler-enabled=true</code>, <code>interval-ms=300000</code> (5 分钟) 已恢复</li>
+    <li>✅ <code>serial-check-enabled=true</code></li>
+    <li>✅ <code>base-port</code> / <code>subscriber-base-port</code> 已按节点维度隔离</li>
+    <li>✅ LEADER 独家广播, FOLLOWER 不广播（已验证）</li>
+    <li>✅ 所有节点都执行 archive 持久化（已验证）</li>
+</ul>
+
+</main>
+
+<button id="backToTop" class="btn btn-primary rounded-circle shadow" title="回到顶部">↑</button>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    const btn = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => {
+        btn.style.display = window.scrollY > 300 ? 'block' : 'none';
+    });
+    btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

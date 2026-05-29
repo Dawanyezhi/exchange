@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>撮合引擎单元测试分析报告</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; width: 220px; height: 100vh;
+            overflow-y: auto; background: #212529; padding: 1rem 0; z-index: 100;
+        }
+        .sidebar .nav-link { color: #adb5bd; font-size: 0.9rem; padding: 0.5rem 1.2rem; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { color: #fff; background: rgba(255,255,255,.1); }
+        .sidebar .nav-header { color: #6c757d; font-size: 0.75rem; padding: 1rem 1.2rem 0.3rem; }
+        .main-content { margin-left: 220px; padding: 2rem; }
+        .stat-card { border-left: 4px solid; border-radius: 0.5rem; }
+        .stat-card.success { border-left-color: #198754; }
+        .stat-card.primary { border-left-color: #0d6efd; }
+        .stat-card.warning { border-left-color: #ffc107; }
+        .progress { height: 1.25rem; }
+        #backToTop {
+            position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+            width: 48px; height: 48px; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+        }
+        .mermaid { display: flex; justify-content: center; margin: 1rem 0; }
+        h2 { font-size: 1.5rem; font-weight: 600; }
+        .new-badge { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    </style>
+</head>
+<body>
+
+<!-- 左侧导航栏 -->
+<nav class="sidebar">
+    <div class="px-3 mb-2">
+        <h6 class="text-white mb-0">撮合引擎</h6>
+        <small class="text-secondary">测试分析报告</small>
+    </div>
+    <hr class="text-secondary mx-3 my-2">
+    <div class="nav-header">概览</div>
+    <a class="nav-link" href="#summary">测试概况</a>
+    <a class="nav-link" href="#coverage">覆盖率统计</a>
+    <div class="nav-header">测试场景</div>
+    <a class="nav-link" href="#market">市价单</a>
+    <a class="nav-link" href="#fok">FOK 订单 <span class="badge bg-success new-badge">新</span></a>
+    <a class="nav-link" href="#stp">StpStrategyService</a>
+    <a class="nav-link" href="#limitorder">processLimitOrder</a>
+    <a class="nav-link" href="#gtc">GTC 订单</a>
+    <a class="nav-link" href="#ioc">IOC 订单</a>
+    <a class="nav-link" href="#postonly">PostOnly 订单</a>
+    <a class="nav-link" href="#guard">兜底分支</a>
+    <div class="nav-header">分析</div>
+    <a class="nav-link" href="#flow">订单流程</a>
+    <a class="nav-link" href="#quality">代码质量</a>
+    <a class="nav-link" href="#gaps">待改进项</a>
+</nav>
+
+<!-- 主内容区 -->
+<div class="main-content" id="top">
+
+    <h1 class="mb-1">撮合引擎单元测试分析报告</h1>
+    <p class="text-muted mb-4">laser-matching-engine &middot; 2026-02-03 (更新)</p>
+
+    <!-- 测试概况 -->
+    <section id="summary" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">测试概况</h2>
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">测试总数</div>
+                    <div class="fs-2 fw-bold text-success">131</div>
+                    <div class="small">全部通过 (+24)</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">MatchEngine 指令覆盖</div>
+                    <div class="fs-2 fw-bold text-success">98%</div>
+                    <div class="small">387 / 395</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">FokOrderProcessor 覆盖</div>
+                    <div class="fs-2 fw-bold text-success">100%</div>
+                    <div class="small">24个测试用例 <span class="badge bg-info">+新</span></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card warning p-3">
+                    <div class="text-muted small">执行耗时</div>
+                    <div class="fs-2 fw-bold">0.8s</div>
+                    <div class="small">构建成功</div>
+                </div>
+            </div>
+        </div>
+
+        <pre class="mermaid mt-4">
+pie title 单元测试分布 (131个)
+    "MatchEngineTest" : 53
+    "FokOrderProcessorTest" : 24
+    "StpStrategyServiceTest" : 17
+    "其他测试" : 37
+        </pre>
+    </section>
+
+    <!-- 覆盖率统计 -->
+    <section id="coverage" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">覆盖率统计</h2>
+
+        <pre class="mermaid">
+xychart-beta
+    title "核心类指令覆盖率 (%)"
+    x-axis ["MatchEngine", "StpStrategy", "MatchOrder", "OrderBook", "DepthLine"]
+    y-axis "覆盖率" 0 --> 100
+    bar [98, 100, 82, 98, 100]
+        </pre>
+
+        <h5 class="mt-4">服务类覆盖</h5>
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+                <tr><th>类</th><th>方法</th><th>指令</th><th>分支</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+                <tr class="table-success">
+                    <td>FokOrderProcessor</td>
+                    <td>process</td>
+                    <td>100%</td>
+                    <td>100%</td>
+                    <td><span class="badge bg-success">完全覆盖</span> <span class="badge bg-info">+新</span></td>
+                </tr>
+                <tr class="table-success">
+                    <td>StpStrategyService</td>
+                    <td>processSTP</td>
+                    <td>100%</td>
+                    <td>100%</td>
+                    <td><span class="badge bg-success">完全覆盖</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h5 class="mt-4">MatchEngine 方法级覆盖</h5>
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+                <tr><th>方法</th><th>指令</th><th>分支</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+                <tr class="table-success"><td>processLimitOrder</td><td>100%</td><td>83% (5/6)</td><td><span class="badge bg-success">已覆盖</span></td></tr>
+                <tr class="table-success"><td>processGtcOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>processIocOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>processPostOnlyOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>tryMatchInstantly</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>match</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>doMatch</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>placeOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>checkMatchConfig</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>clearEmptyDepthLine</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span></td></tr>
+                <tr class="table-success"><td>processFokOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span> <span class="badge bg-info">+新</span></td></tr>
+                <tr class="table-success"><td>processMarketOrder</td><td>100%</td><td>100%</td><td><span class="badge bg-success">完全覆盖</span> <span class="badge bg-info">+新</span></td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- 市价单测试 -->
+    <section id="market" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">市价单测试 (processMarketOrder)</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["processMarketOrder"] --> B{"有对手盘?"}
+    B -->|是| C["执行撮合"]
+    C --> D{"完全成交?"}
+    D -->|是| E["FULL_FILLED ✓"]
+    D -->|否| F["挂单等待 ✓"]
+    B -->|否| G["挂单等待 ✓"]
+
+    style A fill:#0d6efd,color:#fff
+    style E fill:#198754,color:#fff
+    style F fill:#198754,color:#fff
+    style G fill:#198754,color:#fff
+        </pre>
+
+        <table class="table table-bordered">
+            <thead class="table-dark"><tr><th>测试用例</th><th>场景</th><th>状态</th></tr></thead>
+            <tbody>
+                <tr><td>testMarketMatchInstantly</td><td>市价单有对手盘直接撮合</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testMarketMatchNotInstantly</td><td>市价单无法完全成交时挂单</td><td><span class="badge bg-success">通过</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-info mt-3">
+            <strong>市价单特性:</strong> 市价单以当前市场最优价格成交，若对手盘不足则部分成交后挂单等待。
+        </div>
+    </section>
+
+    <!-- FOK 订单测试 -->
+    <section id="fok" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">FOK 订单测试 (FokOrderProcessor#process) <span class="badge bg-success new-badge">新增 24个</span></h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["process(FOK)"] --> B{"价格交叉?"}
+    B -->|否| C["FOK_NOT_CROSS 撤单<br/>3个测试 ✓"]
+    B -->|是| D["Phase1: 预撮合"]
+
+    D --> E["遍历对手盘深度"]
+    E --> F{"深度档位价格交叉?"}
+    F -->|否| G["停止预撮合"]
+    F -->|是| H["fokPhase1"]
+
+    H --> I{"STP检查"}
+    I -->|OP_BREAK| J["终止撮合<br/>2个测试 ✓"]
+    I -->|OP_CONTINUE| K["标记maker撤销,继续<br/>3个测试 ✓"]
+    I -->|OP_NORMAL| L["预成交判断"]
+
+    L --> M{"FOK能完全成交?"}
+    M -->|是| N["进入Phase2"]
+    M -->|否| O["继续遍历"]
+
+    G --> P{"预撮合后FOK完全成交?"}
+    O --> P
+    P -->|否| Q["FOK_NOT_FULLFILL 撤单<br/>2个测试 ✓"]
+    P -->|是| R["Phase2: 真实撮合"]
+
+    R --> S["撤销STP标记的maker订单"]
+    S --> T["fokTryMatchInstantly"]
+    T --> U["FULL_FILLED ✓<br/>14个测试"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#dc3545,color:#fff
+    style J fill:#ffc107,color:#000
+    style K fill:#ffc107,color:#000
+    style Q fill:#dc3545,color:#fff
+    style U fill:#198754,color:#fff
+        </pre>
+
+        <h5 class="mt-4">测试用例详情</h5>
+        <table class="table table-bordered table-sm">
+            <thead class="table-dark"><tr><th>分类</th><th>测试用例</th><th>场景</th><th>状态</th></tr></thead>
+            <tbody>
+                <tr><td rowspan="3">价格不交叉<br/>(FOK_NOT_CROSS)</td>
+                    <td>testFokBuyNotCross</td>
+                    <td>买单FOK价格低于卖盘最低价</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokSellNotCross</td>
+                    <td>卖单FOK价格高于买盘最高价</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokEmptyOppositeBook</td>
+                    <td>对手盘为空</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="2">无法完全成交<br/>(FOK_NOT_FULLFILL)</td>
+                    <td>testFokNotFullFillCancel</td>
+                    <td>FOK订单量大于对手盘总量</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokPartialPriceLevelNotEnough</td>
+                    <td>FOK价格只能匹配部分档位,总量不足</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="4">完全成交</td>
+                    <td>testFokFullFillWithSingleOrder</td>
+                    <td>FOK与单个对手单完全成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokFullFillWithMultipleOrdersSamePrice</td>
+                    <td>FOK与多个对手单完全成交(同价格档位)</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokFullFillAcrossMultiplePriceLevels</td>
+                    <td>FOK跨多个价格档位完全成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokFullFillWithOpponentPartialFill</td>
+                    <td>FOK成交后对手单部分成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="5">STP自成交保护</td>
+                    <td>testFokWithStpCancelTaker</td>
+                    <td>CANCEL_TAKER策略,FOK直接撤单</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokWithStpCancelMaker</td>
+                    <td>CANCEL_MAKER策略,对手单撤销后FOK成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokWithStpCancelMakerAllCancelled</td>
+                    <td>CANCEL_MAKER策略,所有对手单被撤导致FOK无法成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokWithStpCancelBoth</td>
+                    <td>CANCEL_BOTH策略,FOK直接撤单</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokWithStpDefault</td>
+                    <td>DEFAULT策略,不触发STP正常成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="2">卖单FOK</td>
+                    <td>testFokSellFullFill</td>
+                    <td>卖单FOK完全成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokSellNotFullFill</td>
+                    <td>卖单FOK量不足无法完全成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="4">边界场景</td>
+                    <td>testFokExactQuantityMatch</td>
+                    <td>FOK数量刚好等于对手单数量</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokExactPriceCross</td>
+                    <td>FOK价格刚好等于对手单价格边界</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokSmallQuantity</td>
+                    <td>FOK小数量成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokLargeQuantity</td>
+                    <td>FOK大数量成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="3">复杂组合</td>
+                    <td>testFokWithPartialStpCancelMakerThenFullFill</td>
+                    <td>STP部分撤销后剩余对手单足够FOK成交</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testFokMultiplePriceLevelsPartialFill</td>
+                    <td>多价格档位部分成交验证</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>testMultipleFokOrders</td>
+                    <td>连续多个FOK订单处理</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td>账户隔离</td>
+                    <td>testFokDifferentAccountsNoStp</td>
+                    <td>不同账户正常成交不触发STP</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-info mt-3">
+            <strong>FOK (Fill Or Kill) 订单特性:</strong>
+            <ul class="mb-0 mt-2">
+                <li><strong>全部成交或全部撤销:</strong> FOK订单必须立即完全成交，否则整个订单被撤销</li>
+                <li><strong>两阶段撮合:</strong> Phase1预撮合(检查是否能完全成交) + Phase2真实撮合</li>
+                <li><strong>STP保护:</strong> 与普通订单不同，CANCEL_TAKER/CANCEL_BOTH对FOK返回OP_BREAK而不撤单</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- StpStrategyService 测试 -->
+    <section id="stp" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">StpStrategyService 自成交保护测试 (17个) <span class="badge bg-success new-badge">新增</span></h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["processSTP"] --> B{"stpAccountId < 0?"}
+    B -->|是| C["OP_NORMAL<br/>1个测试 ✓"]
+    B -->|否| D{"stpStrategy == null?"}
+    D -->|是| E["OP_NORMAL<br/>1个测试 ✓"]
+    D -->|否| F{"stpStrategy == DEFAULT?"}
+    F -->|是| G["OP_NORMAL<br/>1个测试 ✓"]
+    F -->|否| H{"账户匹配?"}
+    H -->|否| I["OP_NORMAL<br/>1个测试 ✓"]
+    H -->|是| J["switch(stpStrategy)"]
+
+    J --> K["CANCEL_TAKER"]
+    J --> L["CANCEL_MAKER"]
+    J --> M["CANCEL_BOTH"]
+
+    K --> K1{"isFOK?"}
+    K1 -->|是| K2["OP_BREAK<br/>1个测试 ✓"]
+    K1 -->|否| K3["撤taker, OP_BREAK<br/>2个测试 ✓"]
+
+    L --> L1{"isFOK?"}
+    L1 -->|是| L2["OP_CONTINUE<br/>1个测试 ✓"]
+    L1 -->|否| L3["撤maker, OP_CONTINUE<br/>2个测试 ✓"]
+
+    M --> M1{"isFOK?"}
+    M1 -->|是| M2["OP_BREAK<br/>1个测试 ✓"]
+    M1 -->|否| M3["撤双方, OP_BREAK<br/>2个测试 ✓"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style E fill:#198754,color:#fff
+    style G fill:#198754,color:#fff
+    style I fill:#198754,color:#fff
+    style K2 fill:#198754,color:#fff
+    style K3 fill:#198754,color:#fff
+    style L2 fill:#198754,color:#fff
+    style L3 fill:#198754,color:#fff
+    style M2 fill:#198754,color:#fff
+    style M3 fill:#198754,color:#fff
+        </pre>
+
+        <h5 class="mt-4">测试用例详情</h5>
+        <table class="table table-bordered table-sm">
+            <thead class="table-dark"><tr><th>分类</th><th>测试用例</th><th>场景</th><th>状态</th></tr></thead>
+            <tbody>
+                <tr><td rowspan="4">不触发保护<br/>(OP_NORMAL)</td>
+                    <td>processSTP_negativeStpAccountId_shouldReturnNormal</td>
+                    <td>stpAccountId &lt; 0</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_nullStrategy_shouldReturnNormal</td>
+                    <td>stpStrategy == null</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_defaultStrategy_shouldReturnNormal</td>
+                    <td>stpStrategy == DEFAULT</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_differentAccounts_shouldReturnNormal</td>
+                    <td>taker/maker 账户不同</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="3">CANCEL_TAKER</td>
+                    <td>processSTP_cancelTaker_withFOK_shouldBreakWithoutCancel</td>
+                    <td>FOK订单不撤单</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelTaker_nonFOK_shouldCancelTakerAndBreak</td>
+                    <td>GTC订单撤taker</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelTaker_IOC_shouldCancelTakerAndBreak</td>
+                    <td>IOC订单撤taker</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="3">CANCEL_MAKER</td>
+                    <td>processSTP_cancelMaker_withFOK_shouldContinueWithoutCancel</td>
+                    <td>FOK订单不撤单</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelMaker_nonFOK_shouldCancelMakerAndContinue</td>
+                    <td>GTC订单撤maker</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelMaker_postOnly_shouldCancelMakerAndContinue</td>
+                    <td>POST_ONLY订单撤maker</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="3">CANCEL_BOTH</td>
+                    <td>processSTP_cancelBoth_withFOK_shouldBreakWithoutCancel</td>
+                    <td>FOK订单不撤单</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelBoth_nonFOK_shouldCancelBothAndBreak</td>
+                    <td>GTC订单撤双方</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelBoth_IOC_shouldCancelBothAndBreak</td>
+                    <td>IOC订单撤双方</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+
+                <tr><td rowspan="4">边界/综合</td>
+                    <td>processSTP_zeroStpAccountId_shouldTriggerProtection</td>
+                    <td>stpAccountId==0触发保护</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_multipleCalls_shouldAccumulatePendingRemoves</td>
+                    <td>多次调用累积pendingRemoves</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_makerDifferentAccount_boundary</td>
+                    <td>账户边界值测试</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processSTP_cancelMaker_verifyPendingRemovesIntegrity</td>
+                    <td>完整流程验证</td>
+                    <td><span class="badge bg-success">通过</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-info mt-3">
+            <strong>延迟删除机制:</strong> 为避免 <code>ConcurrentModificationException</code>，CANCEL_MAKER 和 CANCEL_BOTH 策略将待删除的 maker 订单加入 <code>pendingRemoves</code> 列表，在遍历结束后统一删除。
+        </div>
+    </section>
+
+    <!-- processLimitOrder 分支覆盖 -->
+    <section id="limitorder" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">processLimitOrder 分支覆盖 (9个)</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["processLimitOrder"] --> B{"timeInForce == null?"}
+    B -->|true| C["return 直接返回<br/>1个测试 ✓"]
+    B -->|false| D["switch(timeInForce)"]
+    D --> E["FOK → processFokOrder<br/>1个测试 ✓"]
+    D --> F["GTC → processGtcOrder<br/>2个测试 ✓"]
+    D --> G["POST_ONLY → processPostOnlyOrder<br/>2个测试 ✓"]
+    D --> H["IOC → processIocOrder<br/>3个测试 ✓"]
+    D -.-> I["隐式default<br/>(不可达)"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style E fill:#198754,color:#fff
+    style F fill:#198754,color:#fff
+    style G fill:#198754,color:#fff
+    style H fill:#198754,color:#fff
+    style I fill:#6c757d,color:#fff
+        </pre>
+
+        <table class="table table-bordered">
+            <thead class="table-dark"><tr><th>分支</th><th>测试用例</th><th>场景描述</th><th>状态</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td><code>if (null)</code> true</td>
+                    <td>processLimitOrder_nullTimeInForce_shouldReturnDirectly</td>
+                    <td>timeInForce 为 null 时直接返回</td>
+                    <td><span class="badge bg-success">通过</span></td>
+                </tr>
+                <tr><td><code>case FOK</code></td><td>processLimitOrder_FOK_shouldProcessFokOrder</td><td>FOK 订单处理</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td rowspan="2"><code>case GTC</code></td><td>processLimitOrder_GTC_noCross_shouldAddToBook</td><td>GTC 无交叉挂单</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processLimitOrder_GTC_withCross_shouldMatch</td><td>GTC 有交叉撮合</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td rowspan="2"><code>case POST_ONLY</code></td><td>processLimitOrder_POST_ONLY_noCross_shouldAddToBook</td><td>POST_ONLY 无交叉挂单</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processLimitOrder_POST_ONLY_withCross_shouldCancel</td><td>POST_ONLY 有交叉撤单</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td rowspan="3"><code>case IOC</code></td><td>processLimitOrder_IOC_noCross_shouldCancel</td><td>IOC 无交叉撤单</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processLimitOrder_IOC_withCross_fullFilled</td><td>IOC 有交叉完全成交</td><td><span class="badge bg-success">通过</span></td></tr>
+                <tr><td>processLimitOrder_IOC_withCross_partialFilled_thenCancel</td><td>IOC 部分成交撤单</td><td><span class="badge bg-success">通过</span></td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- GTC 场景 -->
+    <section id="gtc" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">GTC 订单测试场景 (21个)</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["processGtcOrder"] --> B{"价格交叉?"}
+    B -->|否| C["直接挂单<br/>4个测试"]
+    B -->|是| D["执行撮合"]
+    D --> E{"完全成交?"}
+    E -->|是| F["结束<br/>3个测试"]
+    E -->|否| G["剩余挂单<br/>2个测试"]
+    D --> H["跨档位撮合<br/>4个测试"]
+    D --> I["时间优先<br/>2个测试"]
+    D --> J["边界场景<br/>6个测试"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style F fill:#198754,color:#fff
+    style G fill:#198754,color:#fff
+    style H fill:#198754,color:#fff
+    style I fill:#198754,color:#fff
+    style J fill:#198754,color:#fff
+        </pre>
+    </section>
+
+    <!-- IOC 场景 -->
+    <section id="ioc" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">IOC 订单测试场景 (3个)</h2>
+        <pre class="mermaid">
+flowchart LR
+    A["processIocOrder"] --> B{"价格交叉?"}
+    B -->|否| C["直接撤单"]
+    B -->|是| D["执行撮合"] --> E{"完全成交?"}
+    E -->|是| F["结束"]
+    E -->|否| G["撤销剩余"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style F fill:#198754,color:#fff
+    style G fill:#198754,color:#fff
+        </pre>
+    </section>
+
+    <!-- PostOnly 场景 -->
+    <section id="postonly" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">PostOnly 订单测试场景 (6个)</h2>
+        <pre class="mermaid">
+flowchart LR
+    A["processPostOnlyOrder"] --> B{"价格交叉?"}
+    B -->|是| C["撤单<br/>3个测试"]
+    B -->|否| D["挂单成功<br/>3个测试"]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style D fill:#198754,color:#fff
+        </pre>
+    </section>
+
+    <!-- 兜底分支 -->
+    <section id="guard" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">兜底分支测试 (6个)</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A["撮合核心方法"] --> B["placeOrder"]
+    A --> C["tryMatchInstantly"]
+    A --> D["match"]
+    A --> E["clearEmptyDepthLine"]
+
+    B --> B1["重复订单 reject ✓"]
+    C --> C1["空 DepthLine 跳过 ✓"]
+    C --> C2["价格不交叉停止 ✓"]
+    D --> D1["对手单为 null ✓"]
+    D --> D2["对手单为市价单 ✓"]
+    E --> E1["非空档位保留 ✓"]
+
+    style A fill:#0d6efd,color:#fff
+    style B1 fill:#198754,color:#fff
+    style C1 fill:#198754,color:#fff
+    style C2 fill:#198754,color:#fff
+    style D1 fill:#198754,color:#fff
+    style D2 fill:#198754,color:#fff
+    style E1 fill:#198754,color:#fff
+        </pre>
+    </section>
+
+    <!-- 订单流程 -->
+    <section id="flow" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">订单状态流转</h2>
+        <pre class="mermaid">
+stateDiagram-v2
+    [*] --> NEW : 下单
+    NEW --> PARTIALLY_FILLED : 部分成交
+    NEW --> FULL_FILLED : 完全成交
+    NEW --> CANCELLED : IOC无交叉 / PostOnly交叉 / STP保护
+    NEW --> REJECTED : 重复订单 / 币对未配置
+    PARTIALLY_FILLED --> FULL_FILLED : 剩余成交
+    PARTIALLY_FILLED --> CANCELLED : IOC撤销剩余
+    FULL_FILLED --> [*]
+    CANCELLED --> [*]
+    REJECTED --> [*]
+        </pre>
+    </section>
+
+    <!-- 代码质量 -->
+    <section id="quality" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">代码质量评估</h2>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white">优点</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item"><strong>FokOrderProcessor 100% 分支覆盖</strong> <span class="badge bg-info">+新</span></li>
+                        <li class="list-group-item">StpStrategyService 100% 分支覆盖</li>
+                        <li class="list-group-item"><strong>processMarketOrder 100% 覆盖</strong></li>
+                        <li class="list-group-item">processLimitOrder 分支覆盖 83%</li>
+                        <li class="list-group-item">GTC/IOC/PostOnly 核心路径 100% 覆盖</li>
+                        <li class="list-group-item">tryMatchInstantly / match 分支覆盖 100%</li>
+                        <li class="list-group-item">自成交保护 3 种策略全覆盖</li>
+                        <li class="list-group-item">延迟删除机制避免并发修改异常</li>
+                        <li class="list-group-item">方法职责单一，拆分清晰</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning">待改进</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">switch 隐式 default 分支不可达，可忽略</li>
+                        <li class="list-group-item">日志打印完整 OrderBook JSON 有性能风险</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <pre class="mermaid mt-4">
+xychart-beta
+    title "覆盖率提升对比"
+    x-axis ["MatchEngine指令", "MatchEngine分支", "FokOrderProcessor"]
+    y-axis "覆盖率 %" 0 --> 100
+    bar [98, 98, 0]
+    bar [98, 98, 100]
+        </pre>
+        <p class="text-center text-muted small">蓝色: 上次 | 绿色: 本次</p>
+    </section>
+
+    <!-- 待改进项 -->
+    <section id="gaps" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-3">待改进项</h2>
+        <table class="table table-bordered">
+            <thead class="table-dark"><tr><th>优先级</th><th>问题</th><th>建议</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge bg-secondary">无</span></td>
+                    <td>switch 隐式 default 分支</td>
+                    <td>该分支不可达，可忽略或添加显式 default</td>
+                </tr>
+                <tr>
+                    <td><span class="badge bg-info">低</span></td>
+                    <td>日志打印完整 OrderBook JSON</td>
+                    <td>改为 debug 级别或精简输出</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-success mt-4">
+            <h5>本次改进总结</h5>
+            <ul class="mb-0">
+                <li><strong>FokOrderProcessor 100% 覆盖</strong> - 新增 <strong>24 个</strong> 测试用例</li>
+                <li>覆盖 FOK 订单所有分支: 价格不交叉、无法完全成交、完全成交、STP保护</li>
+                <li>FOK 两阶段撮合逻辑 (Phase1预撮合 + Phase2真实撮合) 全覆盖</li>
+                <li>FOK 与 STP 自成交保护交互场景全覆盖</li>
+                <li>测试总数: 107 &rarr; <strong>131</strong> (+24)</li>
+            </ul>
+        </div>
+    </section>
+
+</div>
+
+<!-- 回到顶部按钮 -->
+<button id="backToTop" class="btn btn-primary" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8679;</button>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+
+    window.addEventListener('scroll', function() {
+        document.getElementById('backToTop').style.display = window.scrollY > 300 ? 'flex' : 'none';
+    });
+
+    const sections = document.querySelectorAll('section[id]');
+    const navLinks = document.querySelectorAll('.sidebar .nav-link');
+    window.addEventListener('scroll', () => {
+        let current = '';
+        sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) current = s.id; });
+        navLinks.forEach(l => {
+            l.classList.remove('active');
+            if (l.getAttribute('href') === '#' + current) l.classList.add('active');
+        });
+    });
+</script>
+</body>
+</html>

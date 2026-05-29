@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Matching Engine - 压力测试框架指南</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            position: relative;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+        }
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 260px;
+            height: 100vh;
+            overflow-y: auto;
+            background: #1b2838;
+            z-index: 1030;
+            padding-top: 1rem;
+            border-right: 3px solid #0d6efd;
+        }
+        .sidebar .nav-link {
+            color: #adb5bd;
+            padding: 0.5rem 1.2rem;
+            font-size: 0.88rem;
+            border-left: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        .sidebar .nav-link:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.05);
+        }
+        .sidebar .nav-link.active {
+            color: #fff;
+            background: rgba(13,110,253,0.15);
+            border-left-color: #0d6efd;
+            font-weight: 600;
+        }
+        .sidebar .sidebar-brand {
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            padding: 0.5rem 1.2rem 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 0.5rem;
+        }
+        .sidebar .sidebar-brand small {
+            display: block;
+            color: #6c757d;
+            font-weight: 400;
+            font-size: 0.75rem;
+            margin-top: 2px;
+        }
+        /* Main content */
+        .main-content {
+            margin-left: 260px;
+            padding: 2rem 2.5rem 4rem;
+        }
+        /* Back to top */
+        .back-to-top {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #0d6efd;
+            color: #fff;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 1040;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .back-to-top:hover {
+            background: #0b5ed7;
+            color: #fff;
+        }
+        .back-to-top.show {
+            display: flex;
+        }
+        /* Section headings */
+        section {
+            scroll-margin-top: 1rem;
+        }
+        h2.section-title {
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #0d6efd;
+            margin-bottom: 1.5rem;
+            margin-top: 2.5rem;
+            font-weight: 700;
+        }
+        /* Scenario cards */
+        .scenario-card {
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+        .scenario-card .card-header {
+            font-weight: 700;
+            font-size: 1.05rem;
+        }
+        /* Badges */
+        .badge-stable { background-color: #198754; }
+        .badge-moderate { background-color: #ffc107; color: #212529; }
+        .badge-unstable { background-color: #dc3545; }
+        /* Tier cards */
+        .tier-card {
+            border-radius: 0.5rem;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .tier1 { background: linear-gradient(135deg, #d4edda, #c3e6cb); border-left: 5px solid #198754; }
+        .tier2 { background: linear-gradient(135deg, #cce5ff, #b8daff); border-left: 5px solid #0d6efd; }
+        .tier3 { background: linear-gradient(135deg, #fff3cd, #ffeeba); border-left: 5px solid #ffc107; }
+        .tier4 { background: linear-gradient(135deg, #f8d7da, #f5c6cb); border-left: 5px solid #dc3545; }
+        /* Table styling */
+        .table-result th {
+            background: #1b2838;
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .table-result td {
+            font-size: 0.88rem;
+            vertical-align: middle;
+        }
+        /* Code block */
+        pre.code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 0.5rem;
+            padding: 1rem 1.2rem;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+        pre.code-block .cmd { color: #dcdcaa; }
+        pre.code-block .flag { color: #9cdcfe; }
+        pre.code-block .val { color: #ce9178; }
+        pre.code-block .comment { color: #6a9955; }
+        /* Formula */
+        .formula-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem 1.5rem;
+            font-family: "SF Mono", "Fira Code", monospace;
+            font-size: 0.95rem;
+            margin: 1rem 0;
+        }
+        /* Mermaid diagram container */
+        .mermaid {
+            text-align: center;
+            margin: 1.5rem 0;
+        }
+        /* FAQ */
+        .faq-item {
+            border-left: 3px solid #0d6efd;
+            padding-left: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .faq-item h5 {
+            color: #0d6efd;
+        }
+        /* Responsive */
+        @media (max-width: 991px) {
+            .sidebar { width: 220px; }
+            .main-content { margin-left: 220px; }
+        }
+        @media (max-width: 767px) {
+            .sidebar { display: none; }
+            .main-content { margin-left: 0; }
+        }
+    </style>
+</head>
+<body data-bs-spy="scroll" data-bs-target="#sidebar-nav" data-bs-offset="20" tabindex="0">
+
+<!-- Sidebar -->
+<nav class="sidebar" id="sidebar-nav">
+    <div class="sidebar-brand">
+        Laser Matching Engine
+        <small>StressTest Framework Guide</small>
+    </div>
+    <ul class="nav flex-column">
+        <li class="nav-item"><a class="nav-link" href="#overview">1. 概述</a></li>
+        <li class="nav-item"><a class="nav-link" href="#architecture">2. 架构设计</a></li>
+        <li class="nav-item"><a class="nav-link" href="#measurement">3. 测量策略</a></li>
+        <li class="nav-item"><a class="nav-link" href="#scenarios">4. 九大测试场景</a></li>
+        <li class="nav-item"><a class="nav-link" href="#results">5. 测试结果数据</a></li>
+        <li class="nav-item"><a class="nav-link" href="#config">6. 配置参数</a></li>
+        <li class="nav-item"><a class="nav-link" href="#run-guide">7. 运行指南</a></li>
+        <li class="nav-item"><a class="nav-link" href="#interpret">8. 结果解读</a></li>
+        <li class="nav-item"><a class="nav-link" href="#faq">9. 常见问题</a></li>
+    </ul>
+</nav>
+
+<!-- Main Content -->
+<div class="main-content">
+
+    <!-- Section 1: 概述 -->
+    <section id="overview">
+        <h2 class="section-title">1. 概述</h2>
+
+        <h4>什么是 MatchEngineStressTest</h4>
+        <p><code>MatchEngineStressTest</code> 是 Laser Matching Engine 专属的自定义压力测试框架。它采用<strong>基于时间的持续运行模式</strong>，对撮合引擎在各类典型交易场景下的吞吐量和延迟进行稳态测量。框架完全使用纯 Java 实现，零外部依赖，可通过 <code>main</code> 方法直接运行。</p>
+
+        <div class="alert alert-info">
+            <strong>核心特性：</strong>
+            <ul class="mb-0">
+                <li>基于时间的持续测量 -- 模拟真实生产环境的稳态负载</li>
+                <li>多轮测量 + 标准差 -- 量化结果稳定性</li>
+                <li>TP50/90/99/99.9 百分位延迟 -- 精细刻画尾部延迟</li>
+                <li>ASCII 直方图 -- 直观展示延迟分布</li>
+                <li>9 个覆盖全面的测试场景 -- 从单档成交到深度扫盘</li>
+            </ul>
+        </div>
+
+        <h4>与 JMH Benchmark 的区别</h4>
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped">
+                <thead class="table-dark">
+                    <tr>
+                        <th>维度</th>
+                        <th>JMH Benchmark</th>
+                        <th>MatchEngineStressTest</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>目的</strong></td>
+                        <td>微观延迟精度</td>
+                        <td>宏观吞吐 + 百分位延迟</td>
+                    </tr>
+                    <tr>
+                        <td><strong>百分位指标</strong></td>
+                        <td>仅 avg</td>
+                        <td>TP50 / TP90 / TP99 / TP99.9</td>
+                    </tr>
+                    <tr>
+                        <td><strong>稳定性验证</strong></td>
+                        <td>多 fork 隔离</td>
+                        <td>多轮持续运行 + 标准差</td>
+                    </tr>
+                    <tr>
+                        <td><strong>输出格式</strong></td>
+                        <td>JSON / Console</td>
+                        <td>ASCII 直方图 + 汇总表格</td>
+                    </tr>
+                    <tr>
+                        <td><strong>外部依赖</strong></td>
+                        <td>JMH 框架</td>
+                        <td>零依赖（纯 Java）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>运行方式</strong></td>
+                        <td>Fork JVM</td>
+                        <td>直接 main 方法</td>
+                    </tr>
+                    <tr>
+                        <td><strong>场景丰富度</strong></td>
+                        <td>需手写 @Benchmark</td>
+                        <td>内置 9 大场景，开箱即用</td>
+                    </tr>
+                    <tr>
+                        <td><strong>破坏性场景</strong></td>
+                        <td>需要 @Setup(Level.Iteration)</td>
+                        <td>自动引擎重建（统一 opsPerEngine），排除重建耗时</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Section 2: 架构设计 -->
+    <section id="architecture">
+        <h2 class="section-title">2. 架构设计</h2>
+
+        <h4>整体架构</h4>
+        <p>框架由五个核心组件协作完成压力测试：</p>
+
+        <div class="mermaid">
+graph TB
+    subgraph "压力测试框架"
+        A["MatchEngineStressTest<br/>(主运行器)"]
+        B["ScenarioConfig<br/>(场景定义)"]
+        C["LatencyStats<br/>(百分位计算)"]
+        D["ConsoleReporter<br/>(输出格式化)"]
+        E["OrderGenerator<br/>(订单工厂)"]
+    end
+
+    F["MatchEngine<br/>(撮合引擎)"]
+
+    A -->|"定义场景"| B
+    A -->|"收集延迟"| C
+    A -->|"输出结果"| D
+    A -->|"生成订单"| E
+    E -->|"limitBuy/limitSell"| F
+    A -->|"placeOrder"| F
+    C -->|"TP50/90/99/99.9"| D
+        </div>
+
+        <h4>类关系图</h4>
+
+        <div class="mermaid">
+classDiagram
+    class MatchEngineStressTest {
+        -int prefillOrders
+        -int priceLevels
+        -int warmupSeconds
+        -int roundSeconds
+        -int measurementRounds
+        +main(String[] args)
+        +run()
+        -runScenario(index, total, sc) ScenarioResult
+        -runTimed(sc, duration, record) RoundMetric
+        -createEngine() MatchEngine
+        -prefillOrderBook(engine)
+    }
+
+    class ScenarioConfig {
+        &lt;&lt;record&gt;&gt;
+        +String name
+        +int opsPerEngine
+        +Consumer~MatchEngine~ action
+    }
+
+    class RoundMetric {
+        &lt;&lt;record&gt;&gt;
+        +int totalOps
+        +long sumOperationNanos
+        +long[] latencySamples
+        +int sampleCount
+        +throughputOpsPerSec() double
+    }
+
+    class ScenarioResult {
+        &lt;&lt;record&gt;&gt;
+        +String name
+        +List~RoundMetric~ rounds
+        +LatencyStats mergedStats
+        +avgThroughput() double
+        +throughputStdDev() double
+        +throughputErrorPct() double
+        +totalOps() int
+    }
+
+    class LatencyStats {
+        -long[] sorted
+        -long sumNanos
+        +count() int
+        +avgUs() double
+        +percentileUs(percentile) double
+        +tp50Us() double
+        +tp90Us() double
+        +tp99Us() double
+        +tp999Us() double
+        +histogram(buckets) int[]
+        +merge(arrays, counts)$ LatencyStats
+    }
+
+    class ConsoleReporter {
+        +printHeader()$
+        +printPhaseStart()$
+        +printRoundResult()$
+        +printScenarioResult()$
+        +printSummaryTable()$
+        +printFooter()$
+    }
+
+    class OrderGenerator {
+        -AtomicLong ORDER_ID_SEQ
+        -AtomicLong ACCOUNT_ID_SEQ
+        +resetSequence()$
+        +limitBuy(price, qty, tif)$ MatchOrder
+        +limitSell(price, qty, tif)$ MatchOrder
+        +marketBuy(qty)$ MatchOrder
+        +marketSell(qty)$ MatchOrder
+    }
+
+    MatchEngineStressTest *-- ScenarioConfig
+    MatchEngineStressTest *-- RoundMetric
+    MatchEngineStressTest *-- ScenarioResult
+    MatchEngineStressTest --> LatencyStats
+    MatchEngineStressTest --> ConsoleReporter
+    MatchEngineStressTest --> OrderGenerator
+    ScenarioResult --> LatencyStats
+        </div>
+
+        <h4>组件职责</h4>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead class="table-dark">
+                    <tr><th>组件</th><th>职责</th><th>关键方法</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>MatchEngineStressTest</code></td>
+                        <td>主运行器，编排预热、测量、汇总流程</td>
+                        <td><code>run()</code>, <code>runScenario()</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>ScenarioConfig</code></td>
+                        <td>场景定义 record，包含名称、每引擎操作数、操作 lambda</td>
+                        <td>构造器</td>
+                    </tr>
+                    <tr>
+                        <td><code>LatencyStats</code></td>
+                        <td>对纳秒延迟数组排序，计算百分位、直方图</td>
+                        <td><code>percentileUs()</code>, <code>merge()</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>ConsoleReporter</code></td>
+                        <td>ASCII Art 格式化输出：表头、逐轮结果、直方图、汇总表</td>
+                        <td><code>printScenarioResult()</code>, <code>printSummaryTable()</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>OrderGenerator</code></td>
+                        <td>快速构造 <code>MatchOrder</code> 对象，自增 ID 保证唯一性</td>
+                        <td><code>limitBuy()</code>, <code>limitSell()</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Section 3: 测量策略 -->
+    <section id="measurement">
+        <h2 class="section-title">3. 测量策略</h2>
+
+        <div class="alert alert-warning">
+            <strong>本节是理解压力测试结果的关键。</strong>所有场景使用统一的测量方法：周期性重建引擎 + 纯操作计时，确保结果直接可比。
+        </div>
+
+        <h4>3.1 总体流程</h4>
+        <p>每个场景的测量遵循「预热 + 多轮测量 + 汇总」三阶段流程：</p>
+
+        <div class="mermaid">
+flowchart LR
+    A["预热阶段<br/>W 秒持续运行<br/>(JIT 预热, 不记录)"] --> B["测量阶段<br/>N 轮 x R 秒/轮"]
+    B --> C["第 1 轮<br/>R 秒"]
+    B --> D["第 2 轮<br/>R 秒"]
+    B --> E["...<br/>"]
+    B --> F["第 N 轮<br/>R 秒"]
+    C --> G["汇总阶段"]
+    D --> G
+    E --> G
+    F --> G
+    G --> H["合并延迟采样<br/>TP50/90/99/99.9"]
+    G --> I["均值吞吐 +/- 误差%"]
+    G --> J["ASCII 直方图"]
+        </div>
+
+        <h4>3.2 统一测量流程</h4>
+        <p>所有场景均使用统一的 <code>runTimed()</code> 方法。每个场景配置了 <code>opsPerEngine</code> 参数，当操作次数达到该阈值时自动重建引擎。<strong>引擎重建时间不计入吞吐量测量，只累计纯操作延迟</strong>。</p>
+
+        <div class="mermaid">
+flowchart TD
+    A["开始测量"] --> B{"totalOperationNanos < durationNanos?"}
+    B -->|"是"| C["重建引擎 + 预填充<br/>(不计时)"]
+    C --> D["计算本批次操作数<br/>batch = min(opsPerEngine, remaining)"]
+    D --> E["opStart = nanoTime()"]
+    E --> F["执行 placeOrder"]
+    F --> G["elapsed = nanoTime() - opStart"]
+    G --> H["totalOperationNanos += elapsed"]
+    H --> I["记录延迟采样"]
+    I --> J["totalOps++, batch--"]
+    J --> K{"batch > 0?"}
+    K -->|"是"| L{"totalOps & 0xFF == 0?"}
+    L -->|"否"| E
+    L -->|"是"| M{"totalOperationNanos >= durationNanos?"}
+    M -->|"否"| E
+    M -->|"是"| N["返回 RoundMetric"]
+    K -->|"否, 达到 opsPerEngine"| B
+    B -->|"否, 超时"| N
+
+    style C fill:#fff3cd
+    style N fill:#cce5ff
+        </div>
+
+        <h4>3.3 吞吐量计算公式</h4>
+
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white"><strong>统一公式（适用于所有场景）</strong></div>
+            <div class="card-body">
+                <div class="formula-box">
+throughput = totalOps * 1e9 / sumOfOperationLatencies
+                </div>
+                <p class="mt-2">其中 <code>sumOfOperationLatencies</code> 是所有操作的纳秒延迟之和。排除了：</p>
+                <ul>
+                    <li>引擎重建时间（<code>createEngine</code> + <code>prefillOrderBook</code>）</li>
+                    <li>批次间的控制流开销</li>
+                </ul>
+                <p class="text-muted small">测量的是「纯操作吞吐量」，体现引擎自身性能上限。所有场景使用相同的计算方式，结果直接可比。</p>
+            </div>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>统一测量方法的优势：</strong><br>
+            所有场景均采用周期性引擎重建 + 纯操作计时的方式，消除了过去非破坏性场景与破坏性场景之间因计算方式不同（挂钟时间 vs 操作延迟之和）导致的数据不可比问题。现在 9 个场景的吞吐量数值具有完全一致的统计口径，可以直接横向对比。
+        </div>
+
+        <h4>3.4 Deadline 检查优化</h4>
+        <p>每次操作都调用 <code>System.nanoTime()</code> 来检查是否超时会带来额外开销（约 80ns/次）。框架采用了<strong>每 256 次操作检查一次</strong>的策略：</p>
+        <pre class="code-block"><span class="comment">// 常量定义</span>
+<span class="flag">private static final int</span> DEADLINE_CHECK_INTERVAL = <span class="val">256</span>;
+<span class="flag">private static final int</span> DEADLINE_CHECK_MASK = DEADLINE_CHECK_INTERVAL - <span class="val">1</span>;  <span class="comment">// 0xFF</span>
+
+<span class="comment">// 热循环中使用位运算代替取模</span>
+<span class="flag">if</span> ((totalOps & DEADLINE_CHECK_MASK) == <span class="val">0</span>) {
+    <span class="flag">if</span> (System.nanoTime() >= deadline) <span class="flag">break</span>;
+}</pre>
+        <p>使用 2 的幂（256 = 2<sup>8</sup>）和位掩码（<code>& 0xFF</code>），可以将取模运算替换为一次位与运算，在热循环中比 <code>% 256</code> 更快。</p>
+
+        <h4>3.5 延迟采样策略</h4>
+        <p>每轮测量最多采集 <strong>1,000,000 个延迟样本</strong>（<code>MAX_SAMPLES_PER_ROUND</code>），多轮之间通过 <code>LatencyStats.merge()</code> 合并。</p>
+        <ul>
+            <li>内存占用：1M 样本 x 8 字节 = <strong>8 MB/轮</strong></li>
+            <li>合并后排序计算百分位：<code>Arrays.sort()</code>，复杂度 O(N log N)</li>
+            <li>百分位定位使用 ceiling 方式：<code>idx = ceil(p/100 * N) - 1</code></li>
+        </ul>
+    </section>
+
+    <!-- Section 4: 九大测试场景 -->
+    <section id="scenarios">
+        <h2 class="section-title">4. 九大测试场景</h2>
+
+        <p>框架内置 9 个覆盖不同交易路径的测试场景，每个场景针对撮合引擎的特定代码路径进行基准测试。</p>
+
+        <div class="mermaid">
+flowchart LR
+    subgraph "九大测试场景 (统一测量, 周期性引擎重建)"
+        S1["1. GTC 不交叉挂单<br/>opsPerEngine=5,000"]
+        S2["2. GTC 单档成交<br/>opsPerEngine=5,000"]
+        S3["3. GTC 多档位成交<br/>opsPerEngine=10"]
+        S4["4. IOC 立即成交<br/>opsPerEngine=5,000"]
+        S5["5. FOK 完全成交<br/>opsPerEngine=5,000"]
+        S6["6. FOK 撤单<br/>opsPerEngine=5,000"]
+        S7["7. POST_ONLY 挂单<br/>opsPerEngine=5,000"]
+        S8["8. 深度订单簿扫盘<br/>opsPerEngine=1"]
+        S9["9. 混合场景<br/>opsPerEngine=2,500"]
+    end
+        </div>
+
+        <!-- Scenario 1 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 1: GTC 不交叉挂单</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以远低于最优卖价的价格（<code>BASE_PRICE - 500</code>）提交 GTC 限价买单。由于价格不交叉，订单直接挂入买方订单簿，不发生撮合。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processGtcOrder() &rarr; addOrder()</code></p>
+                        <p><strong>测试目标：</strong>衡量订单簿的纯插入性能，订单簿使用 TreeMap 存储，插入复杂度与价格档位数相关。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(log N)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>GTC</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 2 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 2: GTC 单档成交</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以卖方最优价格（<code>askBestPrice</code>）提交 GTC 限价买单，每次消耗一个卖单。当卖方最优档订单耗尽时需要重建引擎。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processGtcOrder() &rarr; matchOrder() &rarr; 单笔成交</code></p>
+                        <p><strong>测试目标：</strong>衡量单档位最优价撮合的性能，这是交易所最常见的成交场景。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(1)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>GTC</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 3 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 3: GTC 多档位成交</span>
+                <span class="badge bg-secondary">opsPerEngine = 10</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以横跨 10 个价格档位的数量和价格提交 GTC 限价买单，一次操作吃掉 10 个档位的全部挂单。每次操作消耗 10 个档位，<code>priceLevels / 10 = 10</code> 次操作后引擎重建。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processGtcOrder() &rarr; matchOrder() &rarr; 遍历多档位多笔成交</code></p>
+                        <p><strong>测试目标：</strong>衡量跨多档位撮合的性能，每次操作需要遍历 N 个档位 x M 笔订单。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(N*M)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>10 (priceLevels/10)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>GTC</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 4 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 4: IOC 立即成交</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以卖方最优价格提交 IOC（Immediate-Or-Cancel）限价买单。IOC 订单立即与最优价成交，未成交部分自动取消，不会挂入订单簿。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processIocOrder() &rarr; matchOrder() &rarr; 单笔成交 + 取消剩余</code></p>
+                        <p><strong>测试目标：</strong>衡量 IOC 订单的处理性能。由于省去了挂单步骤，理论上比 GTC 成交更快。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(1)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>IOC</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 5 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 5: FOK 完全成交</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以卖方最优价格提交 FOK（Fill-Or-Kill）限价买单。FOK 订单需要先进行预撮合（prematch）检查是否有足够数量可以完全成交，然后一次性全部成交或全部取消。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processFokOrder() &rarr; prematch检查 &rarr; matchOrder() &rarr; 单笔成交</code></p>
+                        <p><strong>测试目标：</strong>衡量 FOK 订单的处理性能，包含额外的预撮合检查开销。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(1) + prematch</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>FOK</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 6 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 6: FOK 撤单</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以超出订单簿所有卖单的数量（<code>impossibleQty = prefillOrders * 10</code>）提交 FOK 买单。预撮合检查必定失败，订单被直接拒绝，不消耗订单簿。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processFokOrder() &rarr; prematch检查(遍历全部档位) &rarr; 数量不足 &rarr; 撤单</code></p>
+                        <p><strong>测试目标：</strong>衡量 FOK 预撮合在最坏情况下（需要遍历所有档位后才发现数量不足）的性能。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(N*M)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>FOK</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 7 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 7: POST_ONLY 挂单</span>
+                <span class="badge bg-secondary">opsPerEngine = 5,000</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以远低于最优卖价的价格（<code>BASE_PRICE - 500</code>）提交 POST_ONLY 限价买单。POST_ONLY 订单保证只挂单不吃单，检查通过后直接挂入订单簿。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processPostOnlyOrder() &rarr; 交叉检查 &rarr; addOrder()</code></p>
+                        <p><strong>测试目标：</strong>衡量 POST_ONLY 订单类型的挂单性能，与 GTC 不交叉挂单类似但多了 POST_ONLY 专用的交叉检查。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(log N)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>5,000 (totalAskOrders)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>POST_ONLY</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 8 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 8: 深度订单簿扫盘</span>
+                <span class="badge bg-secondary">opsPerEngine = 1</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>以覆盖所有卖方档位的价格和数量提交 GTC 买单，一次操作清空整个卖方订单簿（5,000 笔卖单）。这是最极端的撮合场景。</p>
+                        <p><strong>代码路径：</strong><code>MatchEngine.placeOrder() &rarr; processGtcOrder() &rarr; matchOrder() &rarr; 遍历 100 档位 x 50 订单/档</code></p>
+                        <p><strong>测试目标：</strong>衡量全深度扫盘的极端性能，单次操作处理量最大。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>O(N*M)</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>1（一次清空）</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>GTC</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 9 -->
+        <div class="scenario-card card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span>场景 9: 混合场景</span>
+                <span class="badge bg-secondary">opsPerEngine = 2,500</span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p><strong>描述：</strong>随机混合 4 种订单类型：GTC 不交叉挂单（25%）、GTC 成交（25%）、IOC 成交（25%）、POST_ONLY 挂单（25%）。模拟真实交易环境中的混合订单流。</p>
+                        <p><strong>代码路径：</strong>随机调用以上 4 种订单类型对应的处理路径</p>
+                        <p><strong>测试目标：</strong>衡量引擎在混合负载下的综合性能。由于约 50% 的订单会成交，属于破坏性场景。</p>
+                    </div>
+                    <div class="col-md-4">
+                        <table class="table table-sm table-bordered">
+                            <tr><td><strong>时间复杂度</strong></td><td>随机</td></tr>
+                            <tr><td><strong>opsPerEngine</strong></td><td>2,500 (totalAskOrders/2)</td></tr>
+                            <tr><td><strong>TIF</strong></td><td>GTC/IOC/POST_ONLY 混合</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 5: 测试结果数据 -->
+    <section id="results">
+        <h2 class="section-title">5. 测试结果数据</h2>
+
+        <div class="alert alert-secondary">
+            <strong>测试环境</strong><br>
+            JDK: Azul OpenJDK 17.0.17 &nbsp;|&nbsp; VM: OpenJDK 64-Bit Server VM 17.0.17+10-LTS &nbsp;|&nbsp; OS: macOS Darwin 25.3.0<br>
+            预填充: 10,000 订单, 100 价格档位 &nbsp;|&nbsp; 测量: 3 轮 x 1 秒 (quick mode), 统一纯操作计时
+        </div>
+
+        <h4>5.1 汇总表</h4>
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover table-result">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>场景</th>
+                        <th>平均吞吐 (ops/s)</th>
+                        <th>轮次误差</th>
+                        <th>平均延迟 (us)</th>
+                        <th>TP90 (us)</th>
+                        <th>TP99 (us)</th>
+                        <th>TP99.9 (us)</th>
+                        <th>总操作数</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td>GTC 不交叉挂单</td>
+                        <td class="text-end"><strong>7,450,562</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;1.3%</span></td>
+                        <td class="text-end">0.133</td>
+                        <td class="text-end">0.125</td>
+                        <td class="text-end">0.208</td>
+                        <td class="text-end">0.500</td>
+                        <td class="text-end">22,352,128</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td>GTC 单档成交</td>
+                        <td class="text-end"><strong>7,912,039</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.2%</span></td>
+                        <td class="text-end">0.128</td>
+                        <td class="text-end">0.125</td>
+                        <td class="text-end">0.208</td>
+                        <td class="text-end">0.583</td>
+                        <td class="text-end">23,736,397</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>GTC 多档位成交</td>
+                        <td class="text-end"><strong>542,463</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;2.0%</span></td>
+                        <td class="text-end">1.843</td>
+                        <td class="text-end">13.583</td>
+                        <td class="text-end">21.583</td>
+                        <td class="text-end">30.667</td>
+                        <td class="text-end">1,627,408</td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td>IOC 立即成交</td>
+                        <td class="text-end"><strong>9,578,284</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.2%</span></td>
+                        <td class="text-end">0.104</td>
+                        <td class="text-end">0.125</td>
+                        <td class="text-end">0.167</td>
+                        <td class="text-end">0.291</td>
+                        <td class="text-end">28,735,013</td>
+                    </tr>
+                    <tr>
+                        <td>5</td>
+                        <td>FOK 完全成交</td>
+                        <td class="text-end"><strong>9,554,021</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.6%</span></td>
+                        <td class="text-end">0.105</td>
+                        <td class="text-end">0.125</td>
+                        <td class="text-end">0.208</td>
+                        <td class="text-end">0.500</td>
+                        <td class="text-end">28,662,163</td>
+                    </tr>
+                    <tr>
+                        <td>6</td>
+                        <td>FOK 撤单</td>
+                        <td class="text-end"><strong>16,413</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;1.0%</span></td>
+                        <td class="text-end">60.927</td>
+                        <td class="text-end">64.459</td>
+                        <td class="text-end">93.209</td>
+                        <td class="text-end">153.542</td>
+                        <td class="text-end">49,241</td>
+                    </tr>
+                    <tr>
+                        <td>7</td>
+                        <td>POST_ONLY 挂单</td>
+                        <td class="text-end"><strong>7,370,771</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.3%</span></td>
+                        <td class="text-end">0.135</td>
+                        <td class="text-end">0.166</td>
+                        <td class="text-end">0.208</td>
+                        <td class="text-end">0.292</td>
+                        <td class="text-end">22,112,662</td>
+                    </tr>
+                    <tr>
+                        <td>8</td>
+                        <td>深度订单簿扫盘</td>
+                        <td class="text-end"><strong>5,779</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.3%</span></td>
+                        <td class="text-end">173.036</td>
+                        <td class="text-end">207.417</td>
+                        <td class="text-end">230.959</td>
+                        <td class="text-end">795.584</td>
+                        <td class="text-end">17,339</td>
+                    </tr>
+                    <tr>
+                        <td>9</td>
+                        <td>混合场景</td>
+                        <td class="text-end"><strong>6,577,760</strong></td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.2%</span></td>
+                        <td class="text-end">0.153</td>
+                        <td class="text-end">0.167</td>
+                        <td class="text-end">0.250</td>
+                        <td class="text-end">0.375</td>
+                        <td class="text-end">19,733,760</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h4>5.2 关键场景逐轮数据</h4>
+        <p>以下展示关键场景的逐轮吞吐量数据，验证测量的稳定性和可重复性：</p>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm">
+                <thead class="table-dark">
+                    <tr>
+                        <th>场景</th>
+                        <th class="text-center">轮次 1 (ops/s)</th>
+                        <th class="text-center">轮次 2 (ops/s)</th>
+                        <th class="text-center">轮次 3 (ops/s)</th>
+                        <th class="text-center">波动幅度</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>#1 GTC 不交叉挂单</td>
+                        <td class="text-end">7,322,177</td>
+                        <td class="text-end">7,567,683</td>
+                        <td class="text-end">7,461,828</td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;1.3%</span></td>
+                    </tr>
+                    <tr>
+                        <td>#2 GTC 单档成交</td>
+                        <td class="text-end">7,885,357</td>
+                        <td class="text-end">7,922,978</td>
+                        <td class="text-end">7,927,781</td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.2%</span></td>
+                    </tr>
+                    <tr>
+                        <td>#4 IOC 立即成交</td>
+                        <td class="text-end">9,603,938</td>
+                        <td class="text-end">9,575,130</td>
+                        <td class="text-end">9,555,783</td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.2%</span></td>
+                    </tr>
+                    <tr>
+                        <td>#5 FOK 完全成交</td>
+                        <td class="text-end">9,470,628</td>
+                        <td class="text-end">9,584,982</td>
+                        <td class="text-end">9,606,452</td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.6%</span></td>
+                    </tr>
+                    <tr>
+                        <td>#8 深度订单簿扫盘</td>
+                        <td class="text-end">5,801</td>
+                        <td class="text-end">5,780</td>
+                        <td class="text-end">5,756</td>
+                        <td class="text-center"><span class="badge badge-stable">&#177;0.3%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h4>5.3 性能分级</h4>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="tier-card tier1">
+                    <h5 class="mb-2"><span class="badge bg-success">Tier 1</span> &gt; 600 万 ops/s</h5>
+                    <p class="mb-0">
+                        <strong>#4 IOC 立即成交</strong> (958 万) &nbsp;|&nbsp;
+                        <strong>#5 FOK 完全成交</strong> (955 万) &nbsp;|&nbsp;
+                        <strong>#2 GTC 单档成交</strong> (791 万) &nbsp;|&nbsp;
+                        <strong>#1 GTC 不交叉挂单</strong> (745 万) &nbsp;|&nbsp;
+                        <strong>#7 POST_ONLY 挂单</strong> (737 万) &nbsp;|&nbsp;
+                        <strong>#9 混合场景</strong> (658 万)
+                    </p>
+                    <small class="text-muted">单档 O(1) 撮合或 O(log N) 挂单，纳秒级延迟，引擎极限性能</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tier-card tier2">
+                    <h5 class="mb-2"><span class="badge bg-primary">Tier 2</span> ~54 万 ops/s</h5>
+                    <p class="mb-0">
+                        <strong>#3 GTC 多档位成交</strong> (54 万)
+                    </p>
+                    <small class="text-muted">O(N*M) 多档位撮合，微秒级延迟</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tier-card tier4">
+                    <h5 class="mb-2"><span class="badge bg-danger">Tier 3</span> &lt; 2 万 ops/s</h5>
+                    <p class="mb-0">
+                        <strong>#6 FOK 撤单</strong> (1.6 万) &nbsp;|&nbsp;
+                        <strong>#8 深度订单簿扫盘</strong> (5,779)
+                    </p>
+                    <small class="text-muted">O(N*M) 全深度遍历，数十到数百微秒级延迟</small>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 6: 配置参数 -->
+    <section id="config">
+        <h2 class="section-title">6. 配置参数</h2>
+
+        <p>所有参数通过 Java 系统属性（<code>-D</code> 参数）传入，未指定时使用默认值。</p>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped">
+                <thead class="table-dark">
+                    <tr>
+                        <th>参数名</th>
+                        <th>默认值</th>
+                        <th>说明</th>
+                        <th>影响</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>stress.prefill.orders</code></td>
+                        <td>10,000</td>
+                        <td>预填充订单簿的总订单数（买卖各一半）</td>
+                        <td>影响订单簿深度，买方 5,000 + 卖方 5,000</td>
+                    </tr>
+                    <tr>
+                        <td><code>stress.prefill.priceLevels</code></td>
+                        <td>100</td>
+                        <td>预填充的价格档位数</td>
+                        <td>影响每个档位的订单密度（50 笔/档），影响 O(log N) 和 O(N*M) 场景的性能</td>
+                    </tr>
+                    <tr>
+                        <td><code>stress.warmup.seconds</code></td>
+                        <td>3</td>
+                        <td>每个场景的预热时间（秒）</td>
+                        <td>确保 JIT 编译完成，减少预热期的性能波动</td>
+                    </tr>
+                    <tr>
+                        <td><code>stress.round.seconds</code></td>
+                        <td>3</td>
+                        <td>每个测量轮次的持续时间（秒）</td>
+                        <td>更长的轮次 = 更多采样 = 更精确的百分位</td>
+                    </tr>
+                    <tr>
+                        <td><code>stress.measurement.rounds</code></td>
+                        <td>5</td>
+                        <td>测量轮次数</td>
+                        <td>更多轮次 = 更可靠的均值和更小的误差百分比</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h5>预设配置组合</h5>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header bg-success text-white">快速验证 (~30 秒)</div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li>warmup = 1s</li>
+                            <li>round = 1s</li>
+                            <li>rounds = 3</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">默认模式 (~2.5 分钟)</div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li>warmup = 3s</li>
+                            <li>round = 3s</li>
+                            <li>rounds = 5</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header bg-danger text-white">深度测试 (~10 分钟)</div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li>warmup = 5s</li>
+                            <li>round = 5s</li>
+                            <li>rounds = 10</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 7: 运行指南 -->
+    <section id="run-guide">
+        <h2 class="section-title">7. 运行指南</h2>
+
+        <h4>7.1 Maven 命令行运行</h4>
+
+        <h5>默认配置（约 2.5 分钟）</h5>
+        <pre class="code-block"><span class="cmd">mvn</span> <span class="flag">test-compile</span> <span class="flag">exec:java</span> \
+    <span class="flag">-Dexec.mainClass</span>=<span class="val">"com.laser.exchange.matching.benchmark.MatchEngineStressTest"</span> \
+    <span class="flag">-Dexec.classpathScope</span>=<span class="val">"test"</span></pre>
+
+        <h5>快速验证（约 30 秒）</h5>
+        <pre class="code-block"><span class="cmd">mvn</span> <span class="flag">test-compile</span> <span class="flag">exec:java</span> \
+    <span class="flag">-Dexec.mainClass</span>=<span class="val">"com.laser.exchange.matching.benchmark.MatchEngineStressTest"</span> \
+    <span class="flag">-Dexec.classpathScope</span>=<span class="val">"test"</span> \
+    <span class="flag">-Dstress.warmup.seconds</span>=<span class="val">1</span> \
+    <span class="flag">-Dstress.round.seconds</span>=<span class="val">1</span> \
+    <span class="flag">-Dstress.measurement.rounds</span>=<span class="val">3</span></pre>
+
+        <h5>深度测试（约 10 分钟）</h5>
+        <pre class="code-block"><span class="cmd">mvn</span> <span class="flag">test-compile</span> <span class="flag">exec:java</span> \
+    <span class="flag">-Dexec.mainClass</span>=<span class="val">"com.laser.exchange.matching.benchmark.MatchEngineStressTest"</span> \
+    <span class="flag">-Dexec.classpathScope</span>=<span class="val">"test"</span> \
+    <span class="flag">-Dstress.warmup.seconds</span>=<span class="val">5</span> \
+    <span class="flag">-Dstress.round.seconds</span>=<span class="val">5</span> \
+    <span class="flag">-Dstress.measurement.rounds</span>=<span class="val">10</span></pre>
+
+        <h5>自定义订单簿规模</h5>
+        <pre class="code-block"><span class="cmd">mvn</span> <span class="flag">test-compile</span> <span class="flag">exec:java</span> \
+    <span class="flag">-Dexec.mainClass</span>=<span class="val">"com.laser.exchange.matching.benchmark.MatchEngineStressTest"</span> \
+    <span class="flag">-Dexec.classpathScope</span>=<span class="val">"test"</span> \
+    <span class="flag">-Dstress.prefill.orders</span>=<span class="val">50000</span> \
+    <span class="flag">-Dstress.prefill.priceLevels</span>=<span class="val">500</span></pre>
+
+        <h4>7.2 IDE 运行配置</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <ol>
+                    <li>在 IntelliJ IDEA 中打开 <code>MatchEngineStressTest.java</code></li>
+                    <li>右键点击 <code>main</code> 方法，选择 <strong>Run 'MatchEngineStressTest.main()'</strong></li>
+                    <li>若需自定义参数，编辑 Run Configuration：
+                        <ul>
+                            <li>在 <strong>VM options</strong> 中添加：<code>-Dstress.warmup.seconds=1 -Dstress.round.seconds=1 -Dstress.measurement.rounds=3</code></li>
+                        </ul>
+                    </li>
+                    <li>确保 <strong>Use classpath of module</strong> 选择 <code>test</code> 类路径</li>
+                </ol>
+            </div>
+        </div>
+
+        <h4>7.3 输出示例</h4>
+        <pre class="code-block"><span class="comment">==================================================================</span>
+  Laser Matching Engine -- 压力测试报告
+<span class="comment">==================================================================</span>
+  测试时间:     2026-03-07 14:30:00
+  预填充订单:   10,000
+  价格档位数:   100
+  预热时间:     1 秒
+  测量轮次:     3 轮 x 1 秒/轮
+<span class="comment">==================================================================</span>
+
+  [1/9] GTC 不交叉挂单 -- 预热 (1s)...
+  [1/9] GTC 不交叉挂单 -- 测量 (3s)...
+         轮次 1:   7,322,177 ops/sec  (7,322,177 ops)
+         轮次 2:   7,567,683 ops/sec  (7,567,683 ops)
+         轮次 3:   7,461,828 ops/sec  (7,461,828 ops)
+
+<span class="comment">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+  场景 1/9: GTC 不交叉挂单
+<span class="comment">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+  平均吞吐:   7,450,562 ops/sec (+/-1.3%)
+  总操作数:   22,352,128
+  <span class="comment">──────────────────────────────────────────</span>
+  平均延迟:         0.133 us
+  TP50:             0.125 us
+  TP90:             0.125 us
+  TP99:             0.208 us
+  TP99.9:           0.500 us
+  最小值:           0.042 us
+  最大值:          85.375 us</pre>
+    </section>
+
+    <!-- Section 8: 结果解读 -->
+    <section id="interpret">
+        <h2 class="section-title">8. 结果解读</h2>
+
+        <h4>8.1 吞吐量数值的含义</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <p>吞吐量以 <strong>ops/s</strong>（每秒操作数）表示。一次操作 = 一次 <code>engine.placeOrder(order)</code> 调用。</p>
+                <p>所有场景均使用统一公式计算：<code>throughput = totalOps x 10<sup>9</sup> / sumOfOperationLatencies</code>。该公式仅累计每次 <code>placeOrder</code> 的纯操作耗时，排除了引擎重建、预填充等非操作开销，体现的是「纯操作吞吐量」，即撮合引擎自身的处理能力上限。</p>
+            </div>
+        </div>
+
+        <h4>8.2 百分位延迟（TP Percentiles）</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <table class="table table-sm table-bordered">
+                    <thead class="table-dark">
+                        <tr><th>指标</th><th>含义</th><th>关注点</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>TP50</strong></td>
+                            <td>50% 的操作延迟低于此值</td>
+                            <td>中位数延迟，反映典型性能</td>
+                        </tr>
+                        <tr>
+                            <td><strong>TP90</strong></td>
+                            <td>90% 的操作延迟低于此值</td>
+                            <td>绝大部分请求的延迟上限</td>
+                        </tr>
+                        <tr>
+                            <td><strong>TP99</strong></td>
+                            <td>99% 的操作延迟低于此值</td>
+                            <td>尾部延迟，对交易系统至关重要</td>
+                        </tr>
+                        <tr>
+                            <td><strong>TP99.9</strong></td>
+                            <td>99.9% 的操作延迟低于此值</td>
+                            <td>极端尾部，通常受 GC、OS 调度影响</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="text-muted small">百分位计算方法：将所有延迟样本排序，取 <code>ceil(p/100 * N) - 1</code> 位置的值。样本来源于所有测量轮次的合并。</p>
+            </div>
+        </div>
+
+        <h4>8.3 误差百分比（Error%）</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <p><strong>误差 = 标准差 / 均值 x 100%</strong>，反映多轮测量结果的离散程度。</p>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="alert alert-success mb-0">
+                            <strong>&lt; 5%</strong><br>结果稳定可信
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="alert alert-warning mb-0">
+                            <strong>5% - 20%</strong><br>存在波动，建议增加轮次
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="alert alert-danger mb-0">
+                            <strong>&gt; 20%</strong><br>结果不稳定，需排查干扰
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h4>8.4 测量开销说明</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <p>每次操作需要调用 <code>System.nanoTime()</code> 来记录延迟，该调用本身有约 <strong>~25-80ns</strong> 的开销。对于延迟极低的操作（如场景 2、4、5 的 100-130ns 级别），测量开销占比可达 30-60%。</p>
+                <div class="alert alert-info mb-0">
+                    <strong>实际操作延迟比测量值更低。</strong>测量值是操作延迟 + nanoTime 开销的总和。这是所有纳秒级基准测试的固有限制，不影响场景间的相对比较。
+                </div>
+            </div>
+        </div>
+
+        <h4>8.5 为何 GTC 单档成交吞吐量高于 GTC 不交叉挂单？</h4>
+        <div class="card mb-3">
+            <div class="card-body">
+                <p>在统一测量方法下，场景 2（GTC 单档成交，791 万 ops/s）的吞吐量高于场景 1（GTC 不交叉挂单，745 万 ops/s）。这不是测量误差，而是由代码路径的本质差异决定的：</p>
+                <ol>
+                    <li><strong>O(1) vs O(log N) 的复杂度差异</strong>：单档成交使用 <code>TreeMap.firstEntry()</code> 获取最优价 + <code>LinkedList.poll()</code> 取出第一笔订单，均为 O(1) 操作；而不交叉挂单需要 <code>TreeMap.computeIfAbsent()</code> 进行订单簿插入，这是 O(log N) 操作。</li>
+                    <li><strong>成交路径不修改买方 TreeMap</strong>：单档成交的买单与卖单完全成交（fully filled），买单不会被插入买方订单簿的 TreeMap，省去了一次 O(log N) 插入。</li>
+                    <li><strong>无需创建 DepthLine 对象</strong>：不交叉挂单路径需要为新的价格档位创建 <code>DepthLine</code> 对象并维护订单链表；成交路径直接从已有的档位中取出订单，不创建新对象。</li>
+                    <li><strong>挂单路径有额外日志开销</strong>：不交叉挂单路径包含 <code>log.debug()</code> 日志调用（即使日志级别未开启，方法调用本身仍有开销）；成交路径不含此类调用。</li>
+                </ol>
+                <p class="text-muted small">总结：在最优价匹配的场景中，撮合操作比订单簿插入更轻量，这是撮合引擎数据结构设计的自然结果。</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 9: 常见问题 -->
+    <section id="faq">
+        <h2 class="section-title">9. 常见问题</h2>
+
+        <div class="faq-item">
+            <h5>Q1: 场景 1 和场景 7 的误差是否可信？</h5>
+            <p>在统一测量方法下，场景 1（GTC 不交叉挂单）的误差为 &#177;1.3%，场景 7（POST_ONLY 挂单）的误差为 &#177;0.3%，均处于非常稳定的水平。这是因为所有场景现在都采用周期性引擎重建（opsPerEngine=5,000），每 5,000 次操作后重建引擎，订单簿不会无限膨胀。过去这两个场景误差较高（6.9%、9.7%），正是因为引擎持续复用导致订单簿不断增大，O(log N) 的 N 值随时间增长，各轮次性能逐渐下降。统一测量方法从根本上消除了这个问题。</p>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q2: 场景 6（FOK 撤单）为什么这么慢？</h5>
+            <p>FOK 撤单场景使用了一个不可能满足的数量（<code>prefillOrders * 10 = 100,000</code>），迫使 FOK 预撮合逻辑遍历整个卖方订单簿的所有 100 个价格档位 x 50 笔订单/档 = 5,000 笔订单后，才能确认数量不足并拒绝。这是 O(N*M) 的最坏情况遍历，每次操作约 60us。</p>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q3: 如何增大订单簿规模来测试更真实的场景？</h5>
+            <p>通过系统属性调整预填充参数：</p>
+            <pre class="code-block"><span class="flag">-Dstress.prefill.orders</span>=<span class="val">100000</span> <span class="flag">-Dstress.prefill.priceLevels</span>=<span class="val">1000</span></pre>
+            <p>这将创建 50,000 买单 + 50,000 卖单，分布在 1,000 个价格档位上（50 笔/档）。注意，更大的订单簿会显著影响 O(log N) 和 O(N*M) 场景的性能数值。</p>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q4: 测量结果受系统负载影响大吗？</h5>
+            <p>是的。建议在运行压力测试时：</p>
+            <ul>
+                <li>关闭不必要的后台应用（特别是浏览器、IDE 的代码分析）</li>
+                <li>确保笔记本电脑接通电源（避免省电模式降频）</li>
+                <li>使用默认或深度模式（更多轮次 = 更稳定的均值）</li>
+                <li>关注误差百分比：&lt;5% 说明结果可信</li>
+            </ul>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q5: 为什么不直接使用 JMH？</h5>
+            <p>JMH 是优秀的微基准测试框架，本项目同时提供了 JMH Benchmark。但 JMH 的默认输出只有平均延迟，不提供 TP50/90/99/99.9 百分位分布。此外，JMH 对破坏性场景（需要反复重建订单簿）的支持需要较多样板代码（<code>@Setup(Level.Iteration)</code> + <code>@State</code>），而 MatchEngineStressTest 内置了自动引擎重建和时间排除逻辑，更加简洁。</p>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q6: 延迟采样的 1M 上限会影响百分位精度吗？</h5>
+            <p>对于大多数场景，1M 样本足够精确。以场景 4（IOC 立即成交）为例，3 轮测量共产生约 2800 万次操作，每轮采样上限 1M，合并后约 3M 样本。TP99.9 = 第 2,997,000 个样本的值，精度足够。只有当操作延迟的分布极端不均匀时，采样上限才可能略微影响最高百分位的精度。</p>
+        </div>
+
+        <div class="faq-item">
+            <h5>Q7: 为什么所有场景都需要周期性重建引擎？</h5>
+            <p>统一测量方法要求所有场景使用相同的计算公式（<code>totalOps x 1e9 / sumOfLatencies</code>）。过去，非破坏性场景使用挂钟时间计算吞吐量，破坏性场景使用操作延迟之和，两者的统计口径不同，导致跨场景的吞吐量数值不可直接比较。通过为所有场景设置 <code>opsPerEngine</code>（即周期性重建引擎），统一了测量方式：所有场景都在固定大小的订单簿上运行，所有场景都使用纯操作计时。这使得 9 个场景的吞吐量具有完全一致的含义，可以直接横向对比，消除了方法论差异带来的数据失真。</p>
+        </div>
+    </section>
+
+    <div class="text-center text-muted py-4 mt-4 border-top">
+        <small>Laser Matching Engine - StressTest Framework Guide &nbsp;|&nbsp; 2026</small>
+    </div>
+
+</div><!-- end main-content -->
+
+<!-- Back to Top Button -->
+<a href="#" class="back-to-top" id="backToTop" title="回到顶部">&#8679;</a>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'default',
+        securityLevel: 'loose',
+        flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: 'basis'
+        }
+    });
+</script>
+<script>
+    // Back to top button
+    const backToTop = document.getElementById('backToTop');
+    window.addEventListener('scroll', function() {
+        if (window.scrollY > 300) {
+            backToTop.classList.add('show');
+        } else {
+            backToTop.classList.remove('show');
+        }
+    });
+    backToTop.addEventListener('click', function(e) {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // Initialize Bootstrap ScrollSpy
+    document.addEventListener('DOMContentLoaded', function() {
+        const scrollSpy = new bootstrap.ScrollSpy(document.body, {
+            target: '#sidebar-nav',
+            offset: 80,
+            rootMargin: '0px 0px -60%'
+        });
+    });
+</script>
+</body>
+</html>

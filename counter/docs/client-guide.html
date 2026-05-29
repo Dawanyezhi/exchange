@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Mock Counter - 客户端使用指南</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
+            background: #212529; padding: 1rem 0; overflow-y: auto; z-index: 100;
+        }
+        .sidebar .nav-link {
+            color: #adb5bd; padding: 0.45rem 1.2rem; font-size: 0.9rem;
+            border-left: 3px solid transparent; transition: all 0.2s;
+        }
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            color: #fff; background: rgba(255,255,255,0.05);
+            border-left-color: #0d6efd;
+        }
+        .sidebar .nav-header {
+            color: #6c757d; font-size: 0.75rem; text-transform: uppercase;
+            letter-spacing: 0.05em; padding: 0.8rem 1.2rem 0.3rem;
+        }
+        .sidebar .brand {
+            color: #fff; font-size: 1.1rem; font-weight: 600;
+            padding: 0.5rem 1.2rem 1rem; border-bottom: 1px solid #343a40;
+        }
+        .main-content { margin-left: 260px; padding: 2rem 3rem; max-width: 960px; }
+        pre { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; }
+        .code-json { background: #f0f4f8; }
+        .code-bash { background: #f5f0eb; }
+        .code-java { background: #f0f8f0; }
+        .table th { white-space: nowrap; }
+        .back-to-top {
+            position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+            width: 44px; height: 44px; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 1.3rem; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .back-to-top.show { display: flex; }
+        section { scroll-margin-top: 1rem; }
+        .badge-get  { background: #198754; }
+        .badge-post { background: #0d6efd; }
+        .mermaid { text-align: center; margin: 1.5rem 0; }
+    </style>
+</head>
+<body>
+
+<!-- ==================== 侧边栏 ==================== -->
+<nav class="sidebar d-flex flex-column">
+    <div class="brand"><i class="bi bi-lightning-charge"></i> Laser Mock Counter</div>
+    <div class="nav-header">概述</div>
+    <a class="nav-link" href="#architecture">架构概览</a>
+    <a class="nav-link" href="#quick-start">快速开始</a>
+    <div class="nav-header">配置</div>
+    <a class="nav-link" href="#config-properties">application.properties</a>
+    <a class="nav-link" href="#config-logback">日志配置</a>
+    <div class="nav-header">核心机制</div>
+    <a class="nav-link" href="#client-design">客户端设计</a>
+    <a class="nav-link" href="#reconnect">断线重连</a>
+    <div class="nav-header">REST API</div>
+    <a class="nav-link" href="#api-place">下单</a>
+    <a class="nav-link" href="#api-cancel">撤单</a>
+    <a class="nav-link" href="#api-amend">改单</a>
+    <a class="nav-link" href="#api-batch-start">批量启动</a>
+    <a class="nav-link" href="#api-batch-stop">批量停止</a>
+    <a class="nav-link" href="#api-batch-status">批量状态</a>
+    <a class="nav-link" href="#api-health">健康检查</a>
+    <div class="nav-header">工具</div>
+    <a class="nav-link" href="#client-sh">client.sh 参考</a>
+    <a class="nav-link" href="#batch-testing">批量测试</a>
+    <a class="nav-link" href="#test-scenarios">测试场景</a>
+    <div class="nav-header">参考</div>
+    <a class="nav-link" href="#enums">枚举值</a>
+    <a class="nav-link" href="#sbe-encoding">SBE 编码</a>
+</nav>
+
+<!-- ==================== 主内容 ==================== -->
+<div class="main-content" id="top">
+
+<!-- ==================== 架构概览 ==================== -->
+<section id="architecture" class="mb-5">
+    <h2 class="border-bottom pb-2">架构概览</h2>
+    <p><code>laser-mock-counter</code> 是一个 Spring Boot 客户端，通过 Aeron Cluster Client API 向
+       <strong>laser-matching-engine</strong> Aeron 集群发送 SBE 编码的交易指令（下单 / 撤单 / 改单）。
+       它对外提供 REST API，支持单笔和批量订单操作。</p>
+
+    <div class="mermaid">
+graph TB
+    subgraph laser-mock-counter ["laser-mock-counter (端口 10880)"]
+        direction TB
+        REST["REST API<br/>OrderController"]
+        SVC["OrderService<br/>BatchOrderService"]
+        CLIENT["AeronClusterClientService<br/>MediaDriver SHARED"]
+        REST --> SVC
+        SVC -->|"SBE 编码"| CLIENT
+    end
+
+    subgraph cluster ["laser-matching-engine 集群"]
+        N0["节点 0<br/>localhost:9000"]
+        N1["节点 1<br/>localhost:9001"]
+        N2["节点 2<br/>localhost:9002"]
+    end
+
+    CLIENT -->|"Aeron Ingress (UDP)"| N0
+    CLIENT -.->|"Aeron Ingress"| N1
+    CLIENT -.->|"Aeron Ingress"| N2
+
+    USER["curl / client.sh"] -->|"HTTP"| REST
+    </div>
+
+    <div class="mermaid">
+sequenceDiagram
+    participant User as curl / client.sh
+    participant Ctrl as OrderController
+    participant Svc as OrderService
+    participant Aeron as AeronClusterClientService
+    participant Engine as 撮合引擎集群
+
+    User->>Ctrl: POST /api/order/place (JSON)
+    Ctrl->>Svc: placeOrder(request)
+    Svc->>Svc: SBE encode(buffer)
+    Svc->>Aeron: offer(buffer, 0, length)
+    Aeron->>Engine: Aeron Cluster Ingress (UDP)
+    Aeron-->>Svc: true / false
+    Svc-->>Ctrl: success
+    Ctrl-->>User: {"success": true, "action": "placeOrder"}
+    </div>
+</section>
+
+<!-- ==================== 快速开始 ==================== -->
+<section id="quick-start" class="mb-5">
+    <h2 class="border-bottom pb-2">快速开始</h2>
+    <h5>前置条件</h5>
+    <ul>
+        <li>JDK 17+</li>
+        <li>Maven 3.8+</li>
+        <li><code>laser-common</code> 源码位于 <code>../laser-common</code></li>
+    </ul>
+    <h5>构建与运行</h5>
+    <pre class="code-bash"><code># 一键构建并启动
+./client.sh start
+
+# 或手动操作：
+cd ../laser-common && mvn clean install -DskipTests
+cd ../laser-mock-counter && mvn clean package -DskipTests
+java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+     --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
+     --add-opens java.base/java.nio=ALL-UNNAMED \
+     --add-opens java.base/java.lang=ALL-UNNAMED \
+     -jar target/laser-mock-counter-1.0.0-SNAPSHOT.jar</code></pre>
+    <h5>验证</h5>
+    <pre class="code-bash"><code>curl http://localhost:10880/health
+# {"status":"UP","application":"laser-mock-counter"}</code></pre>
+</section>
+
+<!-- ==================== 配置 ==================== -->
+<section id="config-properties" class="mb-5">
+    <h2 class="border-bottom pb-2">application.properties</h2>
+    <p>所有配置位于 <code>src/main/resources/application.properties</code>。</p>
+
+    <h5 class="mt-4">服务器</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>属性</th><th>默认值</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>server.port</code></td>
+                <td><code>10880</code></td>
+                <td>REST API 的 HTTP 监听端口。如与其他服务冲突可修改。</td>
+            </tr>
+            <tr>
+                <td><code>spring.application.name</code></td>
+                <td><code>laser-mock-counter</code></td>
+                <td>Spring Boot 日志和管理端点使用的应用名称。</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5 class="mt-4">Aeron Cluster 客户端</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>属性</th><th>默认值</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>laser.cluster.client.base-dir</code></td>
+                <td><code>/tmp/laser-client</code></td>
+                <td>Aeron MediaDriver 和集群客户端工作文件的基础目录。内部会创建 <code>aeron/</code> 子目录。每个客户端实例应使用独立的 base-dir 以避免文件冲突。</td>
+            </tr>
+            <tr>
+                <td><code>laser.cluster.client.ingress-endpoints</code></td>
+                <td><code>0=localhost:9000,<br/>1=localhost:9001,<br/>2=localhost:9002</code></td>
+                <td>
+                    逗号分隔的集群成员 ingress 端点列表。格式：<code>&lt;memberId&gt;=&lt;host&gt;:&lt;port&gt;</code>。
+                    客户端会自动发现 Leader 节点并将所有消息路由到该节点。
+                    端口 <strong>9000</strong> 是撮合引擎 <code>AeronClusterConfiguration</code> 中定义的 <code>CLIENT_FACING_PORT_BASE</code>。
+                    每个节点的客户端端口 = <code>9000 + memberId</code>。
+                </td>
+            </tr>
+            <tr>
+                <td><code>laser.cluster.client.egress-channel</code></td>
+                <td><code>aeron:udp?endpoint=localhost:0</code></td>
+                <td>
+                    客户端监听集群 egress（响应）消息的 Aeron 通道。
+                    使用 <code>endpoint=localhost:0</code> 让操作系统分配随机可用 UDP 端口，避免多客户端场景下的端口冲突。
+                </td>
+            </tr>
+            <tr>
+                <td><code>laser.cluster.client.node-count</code></td>
+                <td><code>3</code></td>
+                <td>Aeron 集群中的节点数量。必须与实际集群拓扑一致。用于校验和展示。</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5 class="mt-4">批量订单默认值</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>属性</th><th>默认值</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>laser.batch.default-rate</code></td>
+                <td><code>100</code></td>
+                <td>API 未指定速率时的默认批量发单速率（每秒订单数）。可增大以进行高吞吐压力测试。</td>
+            </tr>
+            <tr>
+                <td><code>laser.batch.default-symbol-code</code></td>
+                <td><code>1</code></td>
+                <td>批量订单生成时使用的默认品种代码。必须是撮合引擎能识别的有效品种代码（uint16，范围 0-65535）。</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5 class="mt-4">配置示例</h5>
+    <pre><code># application.properties
+server.port=10880
+spring.application.name=laser-mock-counter
+
+# Aeron Cluster 客户端
+laser.cluster.client.base-dir=/tmp/laser-client
+laser.cluster.client.ingress-endpoints=0=localhost:9000,1=localhost:9001,2=localhost:9002
+laser.cluster.client.egress-channel=aeron:udp?endpoint=localhost:0
+laser.cluster.client.node-count=3
+
+# 批量默认值
+laser.batch.default-rate=100
+laser.batch.default-symbol-code=1</code></pre>
+</section>
+
+<!-- ==================== 日志配置 ==================== -->
+<section id="config-logback" class="mb-5">
+    <h2 class="border-bottom pb-2">日志配置</h2>
+    <p>日志使用 Logback 框架，配置文件位于 <code>src/main/resources/logback-spring.xml</code>。
+       同时输出到控制台和文件，日志文件支持按大小和日期自动滚动归档。</p>
+
+    <h5>日志文件位置</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>项目</th><th>值</th></tr></thead>
+        <tbody>
+            <tr><td>日志目录</td><td><code>/tmp/laser/logs</code></td></tr>
+            <tr><td>日志文件</td><td><code>/tmp/laser/logs/mock-counter.log</code></td></tr>
+            <tr><td>归档格式</td><td><code>mock-counter.{date}.{index}.log.gz</code></td></tr>
+            <tr><td>单文件上限</td><td>100MB</td></tr>
+            <tr><td>保留天数</td><td>7 天</td></tr>
+            <tr><td>总大小上限</td><td>1GB</td></tr>
+        </tbody>
+    </table>
+
+    <h5>查看日志</h5>
+    <pre class="code-bash"><code># 使用 client.sh 查看实时日志
+./client.sh log
+
+# 或直接 tail
+tail -f /tmp/laser/logs/mock-counter.log</code></pre>
+</section>
+
+<!-- ==================== AeronClusterClientService 设计 ==================== -->
+<section id="client-design" class="mb-5">
+    <h2 class="border-bottom pb-2">AeronClusterClientService 设计</h2>
+    <p><code>AeronClusterClientService</code> 是客户端与 Aeron 集群通信的核心组件。
+       采用 <code>MediaDriver.launch()</code> + 固定目录 + 独立守护线程模式，确保高可用和资源安全。</p>
+
+    <h5>架构设计</h5>
+    <div class="mermaid">
+graph TB
+    subgraph AeronClusterClientService
+        direction TB
+        MD["MediaDriver<br/>固定目录 /tmp/laser-client/aeron<br/>SHARED 线程模型"]
+        HB["心跳线程<br/>ScheduledExecutorService<br/>每 3 秒 sendKeepAlive + pollEgress"]
+        CONN["守护线程<br/>aeron-client-connect<br/>初始连接（不阻塞 Spring）"]
+        RC["重连模块<br/>ensureConnected → reconnect<br/>指数退避策略"]
+        OFFER["offer() 公共接口<br/>背压重试 + 自动重连"]
+    end
+
+    MD --- HB
+    MD --- CONN
+    CONN --> RC
+    HB -->|"失败时标记断连"| RC
+    OFFER -->|"调用前检查"| RC
+    </div>
+
+    <h5>核心设计要点</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>设计</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><strong>MediaDriver.launch() + 固定目录</strong></td>
+                <td>MediaDriver 使用固定目录 <code>/tmp/laser-client/aeron</code>，SHARED 线程模型，
+                    <code>dirDeleteOnStart=true</code> + <code>dirDeleteOnShutdown=true</code>。
+                    启动一次永久复用，不随连接重建而销毁。</td>
+            </tr>
+            <tr>
+                <td><strong>守护线程初始连接</strong></td>
+                <td>初始连接在独立守护线程 <code>aeron-client-connect</code> 上进行，不阻塞 Spring 启动。
+                    连接失败时不影响应用启动，待首次 <code>offer()</code> 调用时自动重连。</td>
+            </tr>
+            <tr>
+                <td><strong>独立心跳线程</strong></td>
+                <td>使用 <code>ScheduledExecutorService</code> 每 3 秒执行 <code>sendKeepAlive()</code> + <code>pollEgress()</code>，
+                    维持 Aeron 会话活跃（服务端 10 秒超时）。心跳失败时自动标记断连状态。</td>
+            </tr>
+            <tr>
+                <td><strong>懒重连模式</strong></td>
+                <td>心跳检测到断连后标记 <code>isConnected=false</code>，不立即重连。
+                    下次 <code>offer()</code> 调用时通过 <code>ensureConnected()</code> 触发重连，避免空转。</td>
+            </tr>
+            <tr>
+                <td><strong>线程安全</strong></td>
+                <td><code>ReentrantLock</code> 防止多线程并发重连；<code>AtomicBoolean</code> / <code>AtomicInteger</code> 管理状态；
+                    <code>volatile</code> 修饰 <code>aeronCluster</code> 保证多线程可见性。</td>
+            </tr>
+            <tr>
+                <td><strong>背压重试</strong></td>
+                <td><code>offer()</code> 发送消息时，遇到背压会重试最多 10 次，
+                    每次重试间调用 <code>pollEgress()</code> + <code>SleepingIdleStrategy</code>。</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5>生命周期</h5>
+    <div class="mermaid">
+sequenceDiagram
+    participant Spring as Spring 容器
+    participant Init as @PostConstruct init()
+    participant MD as MediaDriver
+    participant HB as 心跳线程
+    participant CT as 连接线程
+    participant Cluster as Aeron 集群
+
+    Spring->>Init: Bean 初始化
+    Init->>MD: MediaDriver.launch(固定目录, SHARED)
+    Init->>HB: 启动心跳定时器 (3s)
+    Init->>CT: 启动守护线程
+    CT->>Cluster: AeronCluster.connect()
+    Cluster-->>CT: 连接成功
+    Note over HB,Cluster: 每 3s: sendKeepAlive + pollEgress
+    Note over Spring: Spring 启动完成（不等待连接）
+    </div>
+</section>
+
+<!-- ==================== 断线重连 ==================== -->
+<section id="reconnect" class="mb-5">
+    <h2 class="border-bottom pb-2">断线重连机制</h2>
+    <p><code>AeronClusterClientService</code> 内置了自动断线重连机制。当与集群的连接断开时（如集群重启、网络中断），
+       客户端会自动检测并以指数退避策略持续重试，直到重新连接成功或达到最大重试次数。</p>
+
+    <h5>工作原理</h5>
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> 守护线程连接: @PostConstruct
+    守护线程连接 --> 已连接: 连接成功
+    守护线程连接 --> 等待首次请求: 连接失败
+    已连接 --> 心跳保活: 每 3 秒 sendKeepAlive
+    心跳保活 --> 心跳保活: 正常
+    心跳保活 --> 标记断连: 异常
+    标记断连 --> 等待offer触发: isConnected=false
+    等待offer触发 --> 指数退避重连: offer() → ensureConnected()
+    等待首次请求 --> 指数退避重连: offer() → ensureConnected()
+    指数退避重连 --> 已连接: 重连成功
+    指数退避重连 --> 重连失败: 达到最大次数
+    已连接 --> [*]: @PreDestroy
+    </div>
+
+    <h5>重连参数</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>参数</th><th>值</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>MAX_RECONNECT_ATTEMPTS</code></td>
+                <td><code>10</code></td>
+                <td>单次重连流程的最大尝试次数</td>
+            </tr>
+            <tr>
+                <td><code>INITIAL_RECONNECT_DELAY_MS</code></td>
+                <td><code>1,000</code></td>
+                <td>首次重连等待时间（1 秒）</td>
+            </tr>
+            <tr>
+                <td><code>MAX_RECONNECT_DELAY_MS</code></td>
+                <td><code>30,000</code></td>
+                <td>最大重连等待时间（30 秒）</td>
+            </tr>
+            <tr>
+                <td><code>退避乘数</code></td>
+                <td><code>2</code></td>
+                <td>每次失败后等待时间翻倍</td>
+            </tr>
+            <tr>
+                <td><code>CONSECUTIVE_FAILURE_THRESHOLD</code></td>
+                <td><code>2</code></td>
+                <td>连续失败次数达到此阈值后触发重连</td>
+            </tr>
+            <tr>
+                <td><code>HEARTBEAT_INTERVAL_SECONDS</code></td>
+                <td><code>3</code></td>
+                <td>心跳间隔（秒），需小于服务端 10 秒会话超时</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5>退避策略示例</h5>
+    <table class="table table-bordered table-sm">
+        <thead class="table-light"><tr><th>重试次数</th><th>等待时间</th></tr></thead>
+        <tbody>
+            <tr><td>第 1 次</td><td>1 秒</td></tr>
+            <tr><td>第 2 次</td><td>2 秒</td></tr>
+            <tr><td>第 3 次</td><td>4 秒</td></tr>
+            <tr><td>第 4 次</td><td>8 秒</td></tr>
+            <tr><td>第 5 次</td><td>16 秒</td></tr>
+            <tr><td>第 6 次及以后</td><td>30 秒（上限）</td></tr>
+        </tbody>
+    </table>
+
+    <h5>核心实现</h5>
+    <pre class="code-java"><code>// AeronClusterClientService.java — 指数退避重连
+private void reconnect() {
+    reconnectLock.lock();
+    try {
+        if (isConnected.get()) return;  // 双重检查
+
+        // 关闭旧连接
+        if (aeronCluster != null) aeronCluster.close();
+
+        long delay = INITIAL_RECONNECT_DELAY_MS;  // 1秒
+        for (int attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
+            try {
+                aeronCluster = connectToCluster();  // 复用 MediaDriver
+                return;  // 连接成功
+            } catch (Exception e) {
+                log.warn("Reconnection attempt {}/{} failed", attempt, MAX_RECONNECT_ATTEMPTS);
+                if (attempt < MAX_RECONNECT_ATTEMPTS) {
+                    Thread.sleep(delay);
+                    delay = Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);  // 翻倍，上限 30s
+                }
+            }
+        }
+        log.error("Failed to reconnect after {} attempts", MAX_RECONNECT_ATTEMPTS);
+    } finally {
+        reconnectLock.unlock();
+    }
+}</code></pre>
+
+    <h5>关键设计</h5>
+    <ul>
+        <li><strong>MediaDriver 不销毁</strong>：重连时只关闭旧的 <code>AeronCluster</code>，<code>MediaDriver</code> 始终保持运行，避免资源重建开销。</li>
+        <li><strong>ReentrantLock 防并发</strong>：多个线程同时触发重连时，只有一个线程执行，其余等待后通过双重检查直接返回。</li>
+        <li><strong>懒触发</strong>：心跳失败仅标记 <code>isConnected=false</code>，实际重连由 <code>offer()</code> 触发，避免无业务时空转重连。</li>
+        <li><strong>连续失败计数</strong>：<code>offer()</code> 背压失败和心跳失败均计入 <code>consecutiveFailures</code>，达到阈值 2 后也会触发重连。</li>
+    </ul>
+
+    <h5>日志示例</h5>
+    <pre class="code-bash"><code># 正常连接
+INFO  [aeron-client-connect] AeronCluster connected: ingressEndpoints=0=localhost:9000,...
+INFO  [aeron-client-connect] Initial cluster connection successful
+
+# 心跳检测断连
+WARN  [aeron-client-heartbeat] Heartbeat keep-alive failed, connection may be lost: ...
+
+# 指数退避重连
+WARN  [http-nio-10880-exec-1] Attempting to reconnect to cluster...
+INFO  [http-nio-10880-exec-1] Reconnection attempt 1/10
+INFO  [http-nio-10880-exec-1] Connecting to cluster: 0=localhost:9000,...
+INFO  [http-nio-10880-exec-1] AeronCluster connected: ingressEndpoints=...
+INFO  [http-nio-10880-exec-1] Reconnected to cluster on attempt 1</code></pre>
+</section>
+
+<!-- ==================== REST API: 下单 ==================== -->
+<section id="api-place" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-post">POST</span> /api/order/place</h2>
+    <p>下一笔新订单。请求体经 SBE 编码后通过 Aeron ingress 发送到撮合引擎集群。</p>
+
+    <h5>请求</h5>
+    <pre class="code-json"><code>POST /api/order/place
+Content-Type: application/json
+
+{
+    "orderId": 1234567890,
+    "clientOid": "client-order-001",
+    "accountId": 88001,
+    "symbolCode": 1,
+    "orderType": "LIMIT",
+    "orderSide": "BUY",
+    "timeInForce": "GTC",
+    "delegatePrice": 50123.45,
+    "delegateCount": 3.50,
+    "stpAccountId": 88001,
+    "stpStrategyEnum": "CANCEL_MAKER"
+}</code></pre>
+
+    <h5>请求参数</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>orderId</code></td><td>long</td><td>是</td><td>唯一订单标识（int64）</td></tr>
+            <tr><td><code>clientOid</code></td><td>string</td><td>是</td><td>客户端分配的订单 ID，最长 36 个字符</td></tr>
+            <tr><td><code>accountId</code></td><td>long</td><td>是</td><td>交易账户标识（int64）</td></tr>
+            <tr><td><code>symbolCode</code></td><td>int</td><td>是</td><td>品种代码（uint16，范围 0-65535）</td></tr>
+            <tr><td><code>orderType</code></td><td>string</td><td>是</td><td><code>LIMIT</code> 或 <code>MARKET</code></td></tr>
+            <tr><td><code>orderSide</code></td><td>string</td><td>是</td><td><code>BUY</code> 或 <code>SELL</code></td></tr>
+            <tr><td><code>timeInForce</code></td><td>string</td><td>是</td><td><code>GTC</code>、<code>IOC</code>、<code>FOK</code> 或 <code>POST_ONLY</code></td></tr>
+            <tr><td><code>delegatePrice</code></td><td>decimal</td><td>是</td><td>委托价格（BigDecimal，最多 8 位小数）</td></tr>
+            <tr><td><code>delegateCount</code></td><td>decimal</td><td>是</td><td>委托数量（BigDecimal，最多 8 位小数）</td></tr>
+            <tr><td><code>stpAccountId</code></td><td>long</td><td>是</td><td>自成交防护账户 ID</td></tr>
+            <tr><td><code>stpStrategyEnum</code></td><td>string</td><td>是</td><td><code>DEFAULT</code>、<code>CANCEL_MAKER</code>、<code>CANCEL_TAKER</code> 或 <code>CANCEL_BOTH</code></td></tr>
+        </tbody>
+    </table>
+
+    <h5>成功响应</h5>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "placeOrder"
+}</code></pre>
+
+    <h5>失败响应（集群未连接）</h5>
+    <pre class="code-json"><code>{
+    "success": false,
+    "action": "placeOrder"
+}</code></pre>
+</section>
+
+<!-- ==================== REST API: 撤单 ==================== -->
+<section id="api-cancel" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-post">POST</span> /api/order/cancel</h2>
+    <p>通过订单 ID 撤销一笔已有订单。</p>
+
+    <h5>请求</h5>
+    <pre class="code-json"><code>POST /api/order/cancel
+Content-Type: application/json
+
+{
+    "orderId": 1234567890,
+    "symbolCode": 1
+}</code></pre>
+
+    <h5>请求参数</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>orderId</code></td><td>long</td><td>是</td><td>要撤销的订单 ID</td></tr>
+            <tr><td><code>symbolCode</code></td><td>int</td><td>是</td><td>订单的品种代码（uint16）</td></tr>
+        </tbody>
+    </table>
+
+    <h5>响应</h5>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "cancelOrder"
+}</code></pre>
+</section>
+
+<!-- ==================== REST API: 改单 ==================== -->
+<section id="api-amend" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-post">POST</span> /api/order/amend</h2>
+    <p>修改已有订单的价格和/或数量。</p>
+
+    <h5>请求</h5>
+    <pre class="code-json"><code>POST /api/order/amend
+Content-Type: application/json
+
+{
+    "orderId": 1234567890,
+    "symbolCode": 1,
+    "newDelegatePrice": 51000.50,
+    "newDelegateCount": 2.75
+}</code></pre>
+
+    <h5>请求参数</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>orderId</code></td><td>long</td><td>是</td><td>要修改的订单 ID</td></tr>
+            <tr><td><code>symbolCode</code></td><td>int</td><td>是</td><td>订单的品种代码（uint16）</td></tr>
+            <tr><td><code>newDelegatePrice</code></td><td>decimal</td><td>是</td><td>新价格（BigDecimal）</td></tr>
+            <tr><td><code>newDelegateCount</code></td><td>decimal</td><td>是</td><td>新数量（BigDecimal）</td></tr>
+        </tbody>
+    </table>
+
+    <h5>响应</h5>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "amendOrder"
+}</code></pre>
+</section>
+
+<!-- ==================== REST API: 批量启动 ==================== -->
+<section id="api-batch-start" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-post">POST</span> /api/order/batch/start</h2>
+    <p>以可配置的速率启动持续批量下单。订单随机 50/50 分配为 BUY 和 SELL，其中 10% 的概率生成交叉订单以触发撮合。</p>
+
+    <h5>请求</h5>
+    <pre class="code-bash"><code>POST /api/order/batch/start?rate=200&amp;symbolCode=1&amp;basePrice=50000.00&amp;quantity=1.5</code></pre>
+
+    <h5>查询参数</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>参数</th><th>类型</th><th>默认值</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>rate</code></td><td>int</td><td><code>100</code></td><td>每秒订单数</td></tr>
+            <tr><td><code>symbolCode</code></td><td>int</td><td><code>1</code></td><td>目标品种代码</td></tr>
+            <tr><td><code>basePrice</code></td><td>decimal</td><td><code>50000.00</code></td><td>订单围绕此基准价随机生成</td></tr>
+            <tr><td><code>quantity</code></td><td>decimal</td><td><code>1.5</code></td><td>每笔订单的数量</td></tr>
+        </tbody>
+    </table>
+
+    <h5>响应</h5>
+    <pre class="code-json"><code>{
+    "success": true,
+    "message": "Batch order started",
+    "rate": 200,
+    "symbolCode": 1,
+    "basePrice": 50000.00,
+    "quantity": 1.5
+}</code></pre>
+</section>
+
+<!-- ==================== REST API: 批量停止 ==================== -->
+<section id="api-batch-stop" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-post">POST</span> /api/order/batch/stop</h2>
+    <p>停止正在运行的批量下单并返回最终统计数据。</p>
+
+    <h5>请求</h5>
+    <pre class="code-bash"><code>POST /api/order/batch/stop</code></pre>
+
+    <h5>响应</h5>
+    <pre class="code-json"><code>{
+    "running": false,
+    "totalSent": 12480,
+    "totalFailed": 3,
+    "elapsedMs": 62400,
+    "configuredRate": 200,
+    "symbolCode": 1,
+    "actualRate": 200.00,
+    "success": true,
+    "message": "Batch order stopped"
+}</code></pre>
+
+    <h5>响应字段</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>running</code></td><td>boolean</td><td>停止后始终为 <code>false</code></td></tr>
+            <tr><td><code>totalSent</code></td><td>long</td><td>成功发送到集群的总订单数</td></tr>
+            <tr><td><code>totalFailed</code></td><td>long</td><td>发送失败的总订单数（背压、断连等）</td></tr>
+            <tr><td><code>elapsedMs</code></td><td>long</td><td>自批量启动以来的耗时（毫秒）</td></tr>
+            <tr><td><code>configuredRate</code></td><td>int</td><td>配置的每秒订单数</td></tr>
+            <tr><td><code>symbolCode</code></td><td>int</td><td>本次批量运行使用的品种代码</td></tr>
+            <tr><td><code>actualRate</code></td><td>decimal</td><td>实际测量的吞吐量（订单/秒）</td></tr>
+        </tbody>
+    </table>
+</section>
+
+<!-- ==================== REST API: 批量状态 ==================== -->
+<section id="api-batch-status" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-get">GET</span> /api/order/batch/status</h2>
+    <p>获取实时批量订单统计数据，不会停止批量运行。可在批量运行期间轮询查看。</p>
+
+    <h5>请求</h5>
+    <pre class="code-bash"><code>GET /api/order/batch/status</code></pre>
+
+    <h5>响应（运行中）</h5>
+    <pre class="code-json"><code>{
+    "running": true,
+    "totalSent": 5230,
+    "totalFailed": 1,
+    "elapsedMs": 26150,
+    "configuredRate": 200,
+    "symbolCode": 1,
+    "actualRate": 200.04
+}</code></pre>
+
+    <h5>响应（空闲）</h5>
+    <pre class="code-json"><code>{
+    "running": false,
+    "totalSent": 0,
+    "totalFailed": 0
+}</code></pre>
+</section>
+
+<!-- ==================== REST API: 健康检查 ==================== -->
+<section id="api-health" class="mb-5">
+    <h2 class="border-bottom pb-2"><span class="badge badge-get">GET</span> /health</h2>
+    <p>简单的健康检查端点，用于验证应用是否正在运行。</p>
+
+    <h5>请求</h5>
+    <pre class="code-bash"><code>GET /health</code></pre>
+
+    <h5>响应</h5>
+    <pre class="code-json"><code>{
+    "status": "UP",
+    "application": "laser-mock-counter"
+}</code></pre>
+</section>
+
+<!-- ==================== client.sh ==================== -->
+<section id="client-sh" class="mb-5">
+    <h2 class="border-bottom pb-2">client.sh 参考手册</h2>
+    <p><code>client.sh</code> 是用于构建、启动、停止和操作 mock counter 应用的管理脚本。</p>
+
+    <h5>进程管理命令</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>命令</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr><td><code>./client.sh build</code></td><td>构建 <code>laser-common</code>（mvn install）和 <code>laser-mock-counter</code>（mvn package）</td></tr>
+            <tr><td><code>./client.sh start</code></td><td>构建并后台启动（HTTP 端口 10880）</td></tr>
+            <tr><td><code>./client.sh stop</code></td><td>优雅停止（SIGTERM，等待 10 秒，必要时 SIGKILL）</td></tr>
+            <tr><td><code>./client.sh restart</code></td><td>停止 + 构建 + 启动</td></tr>
+            <tr><td><code>./client.sh status</code></td><td>显示运行状态、PID 和端口信息</td></tr>
+            <tr><td><code>./client.sh log</code></td><td>实时查看应用日志（<code>/tmp/laser/logs/mock-counter.log</code>）</td></tr>
+            <tr><td><code>./client.sh help</code></td><td>显示帮助信息</td></tr>
+        </tbody>
+    </table>
+
+    <h5>订单命令</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>命令</th><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>./client.sh place</code></td>
+                <td><code>[symbolCode] [price] [qty] [side]</code></td>
+                <td>下单。默认值：symbolCode=1, price=50000.00, qty=1.5, side=BUY</td>
+            </tr>
+            <tr>
+                <td><code>./client.sh cancel</code></td>
+                <td><code>&lt;orderId&gt; [symbolCode]</code></td>
+                <td>通过 orderId 撤单（必填）。默认 symbolCode=1</td>
+            </tr>
+            <tr>
+                <td><code>./client.sh amend</code></td>
+                <td><code>&lt;orderId&gt; [newPrice] [newQty] [symbolCode]</code></td>
+                <td>通过 orderId 改单（必填）。默认值：newPrice=50100.00, newQty=2.0, symbolCode=1</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5>批量命令</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>命令</th><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>./client.sh batch-start</code></td>
+                <td><code>[rate] [symbolCode] [basePrice] [qty]</code></td>
+                <td>启动批量发单。默认值：rate=100, symbolCode=1, basePrice=50000.00, qty=1.5</td>
+            </tr>
+            <tr><td><code>./client.sh batch-stop</code></td><td>&mdash;</td><td>停止批量发单并显示统计</td></tr>
+            <tr><td><code>./client.sh batch-status</code></td><td>&mdash;</td><td>显示实时批量统计</td></tr>
+        </tbody>
+    </table>
+
+    <h5>使用示例</h5>
+    <pre class="code-bash"><code># 构建并启动
+./client.sh start
+
+# 下一笔默认 BUY 订单
+./client.sh place
+
+# 为品种 2 下一笔 SELL 订单
+./client.sh place 2 49999.99 2.0 SELL
+
+# 通过 ID 撤单
+./client.sh cancel 1234567890
+
+# 撤销品种 3 上的订单
+./client.sh cancel 1234567890 3
+
+# 改单：修改价格和数量
+./client.sh amend 1234567890 50100.00 2.5
+
+# 以 500 笔/秒启动批量
+./client.sh batch-start 500
+
+# 自定义参数启动批量
+./client.sh batch-start 200 1 60000.00 0.5
+
+# 查看批量进度
+./client.sh batch-status
+
+# 停止批量
+./client.sh batch-stop</code></pre>
+</section>
+
+<!-- ==================== 批量测试指南 ==================== -->
+<section id="batch-testing" class="mb-5">
+    <h2 class="border-bottom pb-2">批量测试指南</h2>
+
+    <h5>工作原理</h5>
+    <div class="mermaid">
+graph LR
+    SCHED["ScheduledExecutorService<br/>周期 = 1,000,000 / rate 微秒"]
+    GEN["订单生成器<br/>50% BUY / 50% SELL<br/>10% 交叉概率"]
+    ENC["SBE 编码"]
+    OFFER["AeronCluster.offer()"]
+
+    SCHED -->|"定时触发"| GEN --> ENC --> OFFER
+    </div>
+
+    <h5>订单生成策略</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>类型</th><th>概率</th><th>BUY 价格</th><th>SELL 价格</th><th>效果</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><strong>普通</strong></td><td>90%</td>
+                <td>basePrice - 随机偏移</td>
+                <td>basePrice + 随机偏移</td>
+                <td>在订单簿上挂单</td>
+            </tr>
+            <tr>
+                <td><strong>交叉</strong></td><td>10%</td>
+                <td>basePrice + 0.1% 价差</td>
+                <td>basePrice - 0.1% 价差</td>
+                <td>触发撮合（成交）</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>普通订单的随机偏移量为基准价的 0.1% 至 1.1%，确保订单簿以合理的价差逐步构建。</p>
+
+    <h5>批量订单字段</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>字段</th><th>值</th></tr></thead>
+        <tbody>
+            <tr><td>orderType</td><td><code>LIMIT</code></td></tr>
+            <tr><td>timeInForce</td><td><code>GTC</code></td></tr>
+            <tr><td>stpStrategyEnum</td><td><code>DEFAULT</code></td></tr>
+            <tr><td>accountId / stpAccountId</td><td><code>10001</code></td></tr>
+            <tr><td>clientOid</td><td><code>batch-{序号}</code></td></tr>
+        </tbody>
+    </table>
+
+    <h5>基准测试工作流</h5>
+    <pre class="code-bash"><code># 1. 启动撮合引擎集群
+cd ../laser-matching-engine && ./cluster.sh start
+
+# 2. 启动 mock counter
+./client.sh start
+
+# 3. 低速率预热
+./client.sh batch-start 100
+
+# 4. 监控吞吐量
+./client.sh batch-status
+
+# 5. 提升速率
+./client.sh batch-stop
+./client.sh batch-start 1000
+
+# 6. 查看最终统计
+./client.sh batch-stop</code></pre>
+</section>
+
+<!-- ==================== 测试场景 ==================== -->
+<section id="test-scenarios" class="mb-5">
+    <h2 class="border-bottom pb-2">测试场景</h2>
+    <p>以下为基于 <code>client.sh</code> 的完整测试场景，涵盖单笔订单操作和批量下单功能。所有测试均使用 <code>symbolCode=1</code>。</p>
+
+    <h5>前置条件</h5>
+    <ul>
+        <li>laser-matching-engine 集群已启动（3 节点）</li>
+        <li>laser-mock-counter 客户端已构建并启动（<code>./client.sh start</code>）</li>
+        <li>确认连接成功：日志中出现 <code>Initial cluster connection successful</code></li>
+    </ul>
+
+    <h5>测试结果汇总</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light">
+            <tr><th>#</th><th>场景</th><th>命令</th><th>请求参数</th><th>预期结果</th><th>实际结果</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>1</td>
+                <td><strong>BUY 下单</strong><br/><small class="text-muted">默认参数限价买单</small></td>
+                <td><code>./client.sh place 1 50000.00 1.5 BUY</code></td>
+                <td>
+                    <code>symbolCode=1</code><br/>
+                    <code>price=50000.00</code><br/>
+                    <code>qty=1.5</code><br/>
+                    <code>side=BUY</code><br/>
+                    <code>orderType=LIMIT</code><br/>
+                    <code>timeInForce=GTC</code>
+                </td>
+                <td><code>success: true</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+            <tr>
+                <td>2</td>
+                <td><strong>SELL 下单</strong><br/><small class="text-muted">指定参数限价卖单</small></td>
+                <td><code>./client.sh place 1 51000.00 2.0 SELL</code></td>
+                <td>
+                    <code>symbolCode=1</code><br/>
+                    <code>price=51000.00</code><br/>
+                    <code>qty=2.0</code><br/>
+                    <code>side=SELL</code><br/>
+                    <code>orderType=LIMIT</code><br/>
+                    <code>timeInForce=GTC</code>
+                </td>
+                <td><code>success: true</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+            <tr>
+                <td>3</td>
+                <td><strong>撤单</strong><br/><small class="text-muted">撤销场景 2 的 SELL 订单</small></td>
+                <td><code>./client.sh cancel {orderId} 1</code></td>
+                <td>
+                    <code>orderId=1773684862587925</code><br/>
+                    <code>symbolCode=1</code>
+                </td>
+                <td><code>success: true</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+            <tr>
+                <td>4</td>
+                <td><strong>改单</strong><br/><small class="text-muted">修改场景 1 BUY 订单的价格和数量</small></td>
+                <td><code>./client.sh amend {orderId} 50100.00 3.0 1</code></td>
+                <td>
+                    <code>orderId=1773684846915717</code><br/>
+                    <code>newPrice=50100.00</code><br/>
+                    <code>newQty=3.0</code><br/>
+                    <code>symbolCode=1</code>
+                </td>
+                <td><code>success: true</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+            <tr>
+                <td>5</td>
+                <td><strong>批量下单启动</strong><br/><small class="text-muted">100 单/秒持续下单</small></td>
+                <td><code>./client.sh batch-start 100 1 50000.00 1.5</code></td>
+                <td>
+                    <code>rate=100</code><br/>
+                    <code>symbolCode=1</code><br/>
+                    <code>basePrice=50000.00</code><br/>
+                    <code>quantity=1.5</code>
+                </td>
+                <td><code>success: true</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+            <tr>
+                <td>6</td>
+                <td><strong>批量状态查看</strong><br/><small class="text-muted">运行 3 秒后查看统计</small></td>
+                <td><code>./client.sh batch-status</code></td>
+                <td>—</td>
+                <td><code>running: true</code><br/><code>totalFailed: 0</code><br/><code>actualRate ≈ 100</code></td>
+                <td class="text-success">PASS<br/><small>sent=1389, rate=99.99</small></td>
+            </tr>
+            <tr>
+                <td>7</td>
+                <td><strong>批量下单停止</strong><br/><small class="text-muted">停止后查看最终统计</small></td>
+                <td><code>./client.sh batch-stop</code></td>
+                <td>—</td>
+                <td><code>success: true</code><br/><code>totalFailed: 0</code></td>
+                <td class="text-success">PASS<br/><small>sent=6246, rate=100.0</small></td>
+            </tr>
+            <tr>
+                <td>8</td>
+                <td><strong>确认批量已停止</strong><br/><small class="text-muted">验证 running=false</small></td>
+                <td><code>./client.sh batch-status</code></td>
+                <td>—</td>
+                <td><code>running: false</code></td>
+                <td class="text-success">PASS</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5>连接稳定性验证</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>检测项</th><th>方法</th><th>结果</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>心跳保活</td>
+                <td>启动后持续 25+ 秒观察日志</td>
+                <td class="text-success">零断连、零心跳失败</td>
+            </tr>
+            <tr>
+                <td>MediaDriver 稳定性</td>
+                <td>固定目录 <code>/tmp/laser-client/aeron</code></td>
+                <td class="text-success">无目录冲突、无资源泄漏</td>
+            </tr>
+            <tr>
+                <td>服务端会话超时</td>
+                <td>检查服务端日志无 <code>onSessionClose reason:TIMEOUT</code></td>
+                <td class="text-success">无超时断连</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h5>场景详细响应</h5>
+
+    <p><strong>场景 1 — BUY 下单响应：</strong></p>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "placeOrder"
+}</code></pre>
+
+    <p><strong>场景 3 — 撤单响应：</strong></p>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "cancelOrder"
+}</code></pre>
+
+    <p><strong>场景 4 — 改单响应：</strong></p>
+    <pre class="code-json"><code>{
+    "success": true,
+    "action": "amendOrder"
+}</code></pre>
+
+    <p><strong>场景 5 — 批量启动响应：</strong></p>
+    <pre class="code-json"><code>{
+    "success": true,
+    "message": "Batch order started",
+    "rate": 100,
+    "symbolCode": 1,
+    "basePrice": 50000.0,
+    "quantity": 1.5
+}</code></pre>
+
+    <p><strong>场景 6 — 批量状态响应（运行中）：</strong></p>
+    <pre class="code-json"><code>{
+    "running": true,
+    "totalSent": 1389,
+    "totalFailed": 0,
+    "elapsedMs": 13892,
+    "configuredRate": 100,
+    "symbolCode": 1,
+    "actualRate": 99.99
+}</code></pre>
+
+    <p><strong>场景 7 — 批量停止响应：</strong></p>
+    <pre class="code-json"><code>{
+    "running": true,
+    "totalSent": 6246,
+    "totalFailed": 0,
+    "elapsedMs": 62457,
+    "configuredRate": 100,
+    "symbolCode": 1,
+    "actualRate": 100.0,
+    "success": true,
+    "message": "Batch order stopped"
+}</code></pre>
+</section>
+
+<!-- ==================== 枚举值 ==================== -->
+<section id="enums" class="mb-5">
+    <h2 class="border-bottom pb-2">枚举值</h2>
+    <p>这些枚举定义在 <code>laser-common</code> 中，用于下单请求。</p>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h5>OrderType（订单类型）</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light"><tr><th>名称</th><th>值</th></tr></thead>
+                <tbody>
+                    <tr><td><code>LIMIT</code>（限价）</td><td>1</td></tr>
+                    <tr><td><code>MARKET</code>（市价）</td><td>2</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h5>OrderSideEnum（买卖方向）</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light"><tr><th>名称</th><th>值</th></tr></thead>
+                <tbody>
+                    <tr><td><code>BUY</code>（买入）</td><td>1</td></tr>
+                    <tr><td><code>SELL</code>（卖出）</td><td>2</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="row mt-3">
+        <div class="col-md-6">
+            <h5>TimeInForceEnum（有效期策略）</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light"><tr><th>名称</th><th>值</th></tr></thead>
+                <tbody>
+                    <tr><td><code>GTC</code>（撤销前有效）</td><td>1</td></tr>
+                    <tr><td><code>IOC</code>（立即成交或撤销）</td><td>2</td></tr>
+                    <tr><td><code>FOK</code>（全部成交或撤销）</td><td>3</td></tr>
+                    <tr><td><code>POST_ONLY</code>（仅做 Maker）</td><td>4</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h5>StpStrategyEnum（自成交防护策略）</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light"><tr><th>名称</th><th>值</th></tr></thead>
+                <tbody>
+                    <tr><td><code>DEFAULT</code>（默认）</td><td>0</td></tr>
+                    <tr><td><code>CANCEL_MAKER</code>（撤 Maker）</td><td>1</td></tr>
+                    <tr><td><code>CANCEL_TAKER</code>（撤 Taker）</td><td>2</td></tr>
+                    <tr><td><code>CANCEL_BOTH</code>（双方撤单）</td><td>3</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== SBE 编码 ==================== -->
+<section id="sbe-encoding" class="mb-5">
+    <h2 class="border-bottom pb-2">SBE 编码</h2>
+    <p>所有订单消息在通过 Aeron Cluster ingress 通道发送前，均使用
+       <a href="https://github.com/real-logic/simple-binary-encoding" target="_blank">Simple Binary Encoding (SBE)</a>
+       进行编码。SBE 提供零拷贝、无内存分配的序列化方式，非常适合低延迟交易系统。</p>
+
+    <div class="mermaid">
+graph LR
+    REQ["PlaceOrderRequest<br/>(Java POJO)"]
+    ENC["request.encode(buffer, 0)<br/>SBE 编码器"]
+    BUF["MutableDirectBuffer<br/>byte[]"]
+    OFFER["cluster.offer(buffer, 0, len)"]
+    UDP["Aeron UDP Ingress"]
+
+    REQ --> ENC --> BUF --> OFFER --> UDP
+    </div>
+
+    <h5>消息类型</h5>
+    <table class="table table-bordered table-striped">
+        <thead class="table-light"><tr><th>请求类</th><th>字段</th><th>SBE Schema</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>PlaceOrderRequest</code></td>
+                <td>orderId, clientOid, accountId, symbolCode, orderType, orderSide, timeInForce, delegatePrice, delegateCount, stpAccountId, stpStrategyEnum</td>
+                <td><code>match-engine-sbe.xml</code></td>
+            </tr>
+            <tr>
+                <td><code>CancelOrderRequest</code></td>
+                <td>orderId, symbolCode</td>
+                <td><code>match-engine-sbe.xml</code></td>
+            </tr>
+            <tr>
+                <td><code>AmendOrderRequest</code></td>
+                <td>orderId, symbolCode, newDelegatePrice, newDelegateCount</td>
+                <td><code>match-engine-sbe.xml</code></td>
+            </tr>
+        </tbody>
+    </table>
+    <p>SBE 编解码类由 <code>laser-common/src/main/resources/sbe/match-engine-sbe.xml</code> 在 Maven <code>generate-sources</code> 阶段自动生成。</p>
+</section>
+
+</div><!-- /main-content -->
+
+<!-- ==================== 回到顶部按钮 ==================== -->
+<a href="#top" class="btn btn-primary back-to-top" id="backToTop" title="回到顶部">
+    <i class="bi bi-arrow-up"></i>
+</a>
+
+<!-- ==================== 脚本 ==================== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+</script>
+<script>
+    // 回到顶部按钮
+    const btn = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => {
+        btn.classList.toggle('show', window.scrollY > 300);
+    });
+
+    // 侧边栏导航高亮
+    const sections = document.querySelectorAll('section[id]');
+    const navLinks = document.querySelectorAll('.sidebar .nav-link');
+    window.addEventListener('scroll', () => {
+        let current = '';
+        sections.forEach(section => {
+            const top = section.offsetTop - 80;
+            if (window.scrollY >= top) current = section.getAttribute('id');
+        });
+        navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+        });
+    });
+</script>
+
+</body>
+</html>

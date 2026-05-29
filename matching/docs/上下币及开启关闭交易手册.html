@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>上下币及开启关闭交易手册</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <style>
+        body { padding-top: 4.5rem; }
+        #sidebar { position: fixed; top: 4.5rem; bottom: 0; left: 0; width: 240px;
+            padding: 1rem; overflow-y: auto; border-right: 1px solid #dee2e6; background: #f8f9fa; }
+        #content { margin-left: 260px; padding: 1rem 2rem; max-width: 1000px; }
+        pre { background: #f6f8fa; padding: .6rem .9rem; border-radius: .375rem; font-size: .88rem; overflow-x: auto; }
+        .mermaid { background: #fff; padding: .5rem; border: 1px solid #e9ecef; border-radius: .375rem; }
+        #backToTop { position: fixed; bottom: 1.5rem; right: 1.5rem; display: none; z-index: 1030; }
+        h2 { margin-top: 2.5rem; padding-top: 4.5rem; margin-top: -1rem; }
+        .pass { color: #198754; font-weight: 600; }
+        .evidence-log { background: #1e1e1e; color: #d4d4d4; padding: .6rem 1rem; border-radius: .375rem; font-size: .82rem; overflow-x: auto; }
+        table { font-size: .92rem; }
+    </style>
+</head>
+<body data-bs-spy="scroll" data-bs-target="#sidebar" data-bs-offset="80">
+
+<nav class="navbar fixed-top navbar-light bg-light border-bottom">
+    <div class="container-fluid">
+        <span class="navbar-brand h1">📘 上下币 / 开关交易 操作手册 (Sprint 4)</span>
+    </div>
+</nav>
+
+<aside id="sidebar">
+    <nav class="nav flex-column">
+        <a class="nav-link" href="#overview">1. 概览</a>
+        <a class="nav-link" href="#concept">2. 核心概念</a>
+        <a class="nav-link" href="#protocol">3. 协议 SBE 定义</a>
+        <a class="nav-link" href="#flow">4. 端到端数据流</a>
+        <a class="nav-link" href="#api">5. REST API</a>
+        <a class="nav-link" href="#cli">6. cluster.sh 命令</a>
+        <a class="nav-link" href="#dogetest">7. dogeUsdt 集成测试</a>
+        <a class="nav-link" href="#stoppedevent">8. 停交易事件</a>
+        <a class="nav-link" href="#determinism">9. 确定性约束</a>
+        <a class="nav-link" href="#faq">10. FAQ</a>
+    </nav>
+</aside>
+
+<main id="content">
+
+<h2 id="overview">1. 概览</h2>
+<p>本手册介绍 Sprint 4 新增的<strong>上下币</strong>与<strong>开关交易</strong>控制面能力。</p>
+
+<table class="table table-sm table-bordered">
+    <thead class="table-light"><tr><th>能力</th><th>SBE Command</th><th>触发方式</th></tr></thead>
+    <tbody>
+    <tr><td>上币 (LIST)</td><td>UpDownSymbolCommand op=1</td><td>HTTP / cluster.sh list-symbol</td></tr>
+    <tr><td>下币 (DELIST)</td><td>UpDownSymbolCommand op=2</td><td>HTTP / cluster.sh delist-symbol</td></tr>
+    <tr><td>开启交易</td><td>TradeSwitchCommand switchOn=true</td><td>HTTP / cluster.sh enable-trade</td></tr>
+    <tr><td>关闭交易</td><td>TradeSwitchCommand switchOn=false</td><td>HTTP / cluster.sh disable-trade</td></tr>
+    </tbody>
+</table>
+
+<div class="alert alert-info">
+<strong>颗粒度对齐</strong>：上下币 / 开关交易是<strong>控制面命令</strong>，与下单 / 撮合 / 撤单（数据面）严格区分：
+<ul>
+    <li>不参与 serialNum 连续性校验（生产部署可允许运维操作和业务命令异步并发）</li>
+    <li>仍使用 cluster 共识时间戳，保证 3 节点状态机确定性</li>
+    <li>仍生成 MatchResult 事件 (UpDownSymbolResult / TradeSwitchResult) 投递到 MDC</li>
+</ul>
+</div>
+
+<h2 id="concept">2. 核心概念</h2>
+
+<h3>2.1 symbolCode 与 symbolName</h3>
+<p><strong>一一对应</strong>：</p>
+<ul>
+    <li><code>symbolCode</code> (uint16) = 全局唯一整数 ID。例: <code>1</code></li>
+    <li><code>symbolName</code> (varString) = 唯一名字。例: <code>"btc-usdt"</code></li>
+    <li>两者绑定，注册后不可修改</li>
+</ul>
+
+<h3>2.2 SymbolConfig vs MatchConfig</h3>
+<table class="table table-sm">
+    <thead><tr><th>配置</th><th>位置</th><th>含义</th></tr></thead>
+    <tbody>
+    <tr><td>SymbolConfig</td><td>MatchContext.symbolConfigMap</td><td>币对元数据 (code/name/baseCoin/quoteCoin)。<strong>下币时移除</strong></td></tr>
+    <tr><td>MatchConfig</td><td>MatchEngineState.configMap</td><td>交易开关 (enabled)。上币默认 false, 需要 enable-trade 才能下单</td></tr>
+    <tr><td>OrderBook</td><td>MatchContext.orderBookMap</td><td>订单簿，上币时预创建空实例，下币时移除</td></tr>
+    </tbody>
+</table>
+
+<h3>2.3 上下币与开关交易的关系</h3>
+<div class="mermaid">
+stateDiagram-v2
+    [*] --> 未注册: 初始
+    未注册 --> 已上币_未启用: list-symbol (默认 enabled=false)
+    已上币_未启用 --> 已上币_已启用: enable-trade
+    已上币_已启用 --> 已上币_未启用: disable-trade
+    已上币_未启用 --> 未注册: delist-symbol
+    已上币_已启用 --> 未注册: delist-symbol (内部先 disable 再删除)
+</div>
+
+<h2 id="protocol">3. 协议 SBE 定义</h2>
+
+<h3>3.1 UpDownSymbolCommand (templateId=105)</h3>
+<table class="table table-sm">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody>
+    <tr><td>op</td><td>SymbolOp uint8</td><td>1=LIST 上币, 2=DELIST 下币</td></tr>
+    <tr><td>symbolCode</td><td>uint16</td><td>币对 ID</td></tr>
+    <tr><td>baseCoinId</td><td>uint32</td><td>基础币 ID (如 doge)</td></tr>
+    <tr><td>quoteCoinId</td><td>uint32</td><td>计价币 ID (如 usdt)</td></tr>
+    <tr><td>symbolName</td><td>varString</td><td>币对名 (如 "doge-usdt")</td></tr>
+    </tbody>
+</table>
+
+<h3>3.2 TradeSwitchCommand (templateId=106)</h3>
+<table class="table table-sm">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody>
+    <tr><td>symbolCode</td><td>uint16</td><td>币对 ID</td></tr>
+    <tr><td>switchOn</td><td>BooleanType uint8</td><td>true=开启, false=关闭</td></tr>
+    </tbody>
+</table>
+
+<h3>3.3 UpDownSymbolResult (templateId=203)</h3>
+<p>公共头 + op + symbolCode + baseCoinId + quoteCoinId + symbolName</p>
+
+<h3>3.4 TradeSwitchResult (templateId=204)</h3>
+<p>公共头 + symbolCode + switchOn + symbolId</p>
+
+<h2 id="flow">4. 端到端数据流</h2>
+<div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Op as 运维 (cluster.sh / curl)
+    participant Mock as mock-counter (10880)
+    participant L as Cluster LEADER
+    participant F as 2 个 FOLLOWER
+    participant MDC as ResultMdcBroadcaster
+    participant Sub as 客户端 ResultMdcSubscriber
+
+    Op->>Mock: POST /api/symbol/list?...
+    Mock->>L: SBE UpDownSymbolCommand
+    L->>F: raft 复制
+    par 全节点更新状态
+        L->>L: SymbolService.listSymbol → SymbolConfig + MatchConfig(disabled)
+        F->>F: SymbolService.listSymbol (replay)
+    end
+    L->>MDC: appendUpDownSymbol(LIST,...) 仅 LEADER 广播
+    MDC->>Sub: UpDownSymbolResult templateId=203
+    Sub->>Sub: 解码 + 日志
+</div>
+
+<h2 id="api">5. REST API</h2>
+
+<table class="table table-bordered">
+    <thead class="table-light"><tr><th>方法</th><th>路径</th><th>参数</th></tr></thead>
+    <tbody>
+    <tr>
+        <td>POST</td>
+        <td><code>/api/symbol/list</code></td>
+        <td>symbolCode, symbolName, baseCoinId, quoteCoinId</td>
+    </tr>
+    <tr>
+        <td>POST</td>
+        <td><code>/api/symbol/delist</code></td>
+        <td>symbolCode</td>
+    </tr>
+    <tr>
+        <td>POST</td>
+        <td><code>/api/symbol/enable-trade</code></td>
+        <td>symbolCode</td>
+    </tr>
+    <tr>
+        <td>POST</td>
+        <td><code>/api/symbol/disable-trade</code></td>
+        <td>symbolCode</td>
+    </tr>
+    </tbody>
+</table>
+
+<h3>请求/响应示例</h3>
+<pre><code># 上币
+curl -X POST "http://localhost:10880/api/symbol/list?symbolCode=3&symbolName=doge-usdt&baseCoinId=100&quoteCoinId=200"
+{"success":true,"action":"list","symbolCode":3,"symbolName":"doge-usdt"}
+
+# 开启交易
+curl -X POST "http://localhost:10880/api/symbol/enable-trade?symbolCode=3"
+{"success":true,"action":"enable-trade","symbolCode":3}
+
+# 关闭交易
+curl -X POST "http://localhost:10880/api/symbol/disable-trade?symbolCode=3"
+{"success":true,"action":"disable-trade","symbolCode":3}
+
+# 下币
+curl -X POST "http://localhost:10880/api/symbol/delist?symbolCode=3"
+{"success":true,"action":"delist","symbolCode":3}</code></pre>
+
+<h2 id="cli">6. cluster.sh 命令</h2>
+
+<pre><code>./cluster.sh list-symbol &lt;code&gt; &lt;name&gt; &lt;baseCoin&gt; &lt;quoteCoin&gt;
+./cluster.sh delist-symbol &lt;code&gt;
+./cluster.sh enable-trade &lt;code&gt;
+./cluster.sh disable-trade &lt;code&gt;</code></pre>
+
+<div class="alert alert-warning">
+<strong>前置条件</strong>：cluster.sh 上述命令通过 mock-counter (10880) 转发到集群，
+执行前请确认 mock-counter 已运行 (<code>./client.sh start</code>)。
+</div>
+
+<h3>实战示例 — dogeUsdt 全周期</h3>
+<pre><code># 1. 启动集群和 mock-counter
+./cluster.sh start-all
+./client.sh start
+
+# 2. 上币
+./cluster.sh list-symbol 3 doge-usdt 100 200
+
+# 3. 开启交易
+./cluster.sh enable-trade 3
+
+# 4. 业务下单
+./client.sh place 3 0.5 100 BUY
+
+# 5. 关闭交易 (将拒绝后续下单)
+./cluster.sh disable-trade 3
+
+# 6. 下币 (彻底移除)
+./cluster.sh delist-symbol 3</code></pre>
+
+<h2 id="dogetest">7. dogeUsdt 集成测试 (实测证据)</h2>
+
+<table class="table table-bordered">
+    <thead class="table-light"><tr><th>#</th><th>步骤</th><th>预期</th><th>实测</th></tr></thead>
+    <tbody>
+    <tr><td>1</td><td>list-symbol 3 doge-usdt 100 200</td><td>SymbolConfig + 默认 disabled MatchConfig</td><td class="pass">✅ MDC #1 templateId=203</td></tr>
+    <tr><td>2</td><td>未开启时下单</td><td>触发 TradeSwitchResult(off) 事件</td><td class="pass">✅ MDC templateId=204, 服务端 "未开启交易,发停交易事件"</td></tr>
+    <tr><td>3</td><td>enable-trade 3</td><td>MatchConfig.enabled = true</td><td class="pass">✅ TRADE_SWITCH switchOn=true</td></tr>
+    <tr><td>4</td><td>开启后下单</td><td>handlePlace 处理成交</td><td class="pass">✅ handlePlace serialNum=2 进入撮合</td></tr>
+    <tr><td>5</td><td>disable-trade 3</td><td>MatchConfig.enabled = false</td><td class="pass">✅ TRADE_SWITCH switchOn=false</td></tr>
+    <tr><td>6</td><td>关闭后下单</td><td>"[下单拒绝]" + TradeSwitchResult(off)</td><td class="pass">✅</td></tr>
+    <tr><td>7</td><td>delist-symbol 3</td><td>移除 SymbolConfig + OrderBook + MatchConfig</td><td class="pass">✅ DELIST symbol</td></tr>
+    </tbody>
+</table>
+
+<h3>实测日志片段</h3>
+<pre class="evidence-log">=== 上币 ===
+SymbolService LIST symbol: code=3, name=doge-usdt, base=100, quote=200 (default disabled)
+MDC-RESULT #1 SYMBOL/SWITCH event templateId=203
+
+=== 未开启时下单 (触发停交易事件) ===
+CommandDispatcher handlePlace serialNum=2, symbolCode=3
+CommandDispatcher [handlePlace] symbol doge-usdt 未开启交易,发停交易事件
+MDC-RESULT #3 SYMBOL/SWITCH event templateId=204    ← 上游感知
+
+=== 开启交易 ===
+SymbolService TRADE_SWITCH symbol: code=3, name=doge-usdt, switchOn=true
+
+=== 开启后下单成功 ===
+handlePlace serialNum=2, ... symbolCode=3 → 进入撮合
+
+=== 关闭交易 ===
+SymbolService TRADE_SWITCH symbol: code=3, name=doge-usdt, switchOn=false
+
+=== 下币 ===
+SymbolService DELIST symbol: code=3, name=doge-usdt</pre>
+
+<h2 id="stoppedevent">8. 停交易事件 (Sprint 4 关键反馈)</h2>
+
+<p>当用户对<strong>未启用交易</strong>的币对发起 place / amend / cancel 时，<strong>必须主动推送一个 TradeSwitchResult(switchOn=false) 事件</strong>给上游，避免 silent reject。</p>
+
+<h3>实现位置</h3>
+<p><code>CommandDispatcher.emitTradeStoppedEvent</code></p>
+<pre><code>private void emitTradeStoppedEvent(long timestamp, int symbolCode, String symbolName, long requestSerialNum) {
+    eventsHelper.beginRequest(requestSerialNum, timestamp);
+    eventsHelper.appendTradeSwitch(symbolCode, symbolName, false);  // switchOn=false
+    flushAndPersist();
+}</code></pre>
+
+<h3>触发时机</h3>
+<ul>
+    <li>handlePlace / handleAmend / handleCancel</li>
+    <li>serialNum 校验通过 + symbolId 存在</li>
+    <li><strong>但</strong> MatchConfig 不存在或 enabled=false</li>
+</ul>
+
+<h2 id="determinism">9. 确定性约束</h2>
+
+<table class="table table-sm">
+    <thead><tr><th>维度</th><th>保证</th></tr></thead>
+    <tbody>
+    <tr><td>3 节点状态机一致</td><td>所有节点都在状态机线程内执行 SymbolService.listSymbol/delistSymbol/switchTrade</td></tr>
+    <tr><td>事件时间戳</td><td>使用 cluster.time() 共识时间戳, 不用 System.currentTimeMillis</td></tr>
+    <tr><td>MDC 广播</td><td>仅 LEADER 推送, FOLLOWER 仅持久化, 避免 3 副本重复广播</td></tr>
+    <tr><td>幂等</td><td>重复 LIST 不会重置已开启的 enabled; DELIST 不存在的 symbol 不抛异常仍发事件</td></tr>
+    <tr><td>raftlog 回放</td><td>kill-restart 后 raftlog 自动 replay 上下币命令, 状态完全恢复</td></tr>
+    </tbody>
+</table>
+
+<h2 id="faq">10. FAQ</h2>
+
+<h3>Q: 上币后为什么不能立即交易？</h3>
+<p>A: 用户要求"<em>需要生成对应的matchConfig，默认enable为false</em>"。这是双重保护——上币是元数据注册，开启交易是业务上线，需要分别确认。这样同一个币对在不同环境（test/staging/prod）可以独立控制启停。</p>
+
+<h3>Q: 下币时已挂的订单怎么处理？</h3>
+<p>A: 当前实现<strong>直接移除 OrderBook</strong>，已挂订单会丢失。生产环境建议在下币前先调用 disable-trade，等所有用户撤单或人工撤单后再 delist。Sprint 5 候选：增加 delist 前自动撤单的开关。</p>
+
+<h3>Q: 上下币命令为什么不参与 serialNum 校验？</h3>
+<p>A: 因为它们是<strong>控制面</strong>命令——由运维端发起、低频、与业务流序列无关；而 serialNum 校验是为了检测<strong>数据面</strong>下单流的丢包。两条流在 SBE 层面通过 templateId 区分，校验路径独立，避免运维操作影响业务串行性。</p>
+
+<h3>Q: 关闭交易后挂在簿上的订单怎么样？</h3>
+<p>A: 仍然在 OrderBook 中，但用户既不能新下单也不能改/撤单 (会收到 TradeSwitchResult(off) 事件)。 一旦再 enable-trade 就恢复正常。</p>
+
+<h3>Q: 3 节点中只有 LEADER 才执行上币吗？</h3>
+<p>A: 否。所有节点都执行 SymbolService.listSymbol / delistSymbol / switchTrade —— 这是<strong>状态机复制</strong>的本质要求。但只有 LEADER 把 MatchResult 推到 MDC（避免 3 副本重复广播）。</p>
+
+</main>
+
+<button id="backToTop" class="btn btn-primary rounded-circle shadow" title="回到顶部">↑</button>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    const btn = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => { btn.style.display = window.scrollY > 300 ? 'block' : 'none'; });
+    btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

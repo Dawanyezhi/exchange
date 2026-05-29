@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<messageSchema xmlns="http://fixprotocol.io/2016/SBE"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xsi:schemaLocation="http://fixprotocol.io/2016/SBE http://fixprotocol.io/2016/SBE"
+               package="com.laser.exchange.common.codec"
+               id="2"
+               version="1"
+               semanticVersion="1.1.0"
+               byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader" description="Standard SBE message header.">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+
+        <composite name="varStringEncoding" description="Variable length UTF-8 string.">
+            <type name="length" primitiveType="uint32" maxValue="1048576"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+
+        <!-- ====================== 枚举定义 ====================== -->
+
+        <enum name="BooleanType" encodingType="uint8">
+            <validValue name="FALSE">0</validValue>
+            <validValue name="TRUE">1</validValue>
+        </enum>
+
+        <enum name="OrderType" encodingType="uint8">
+            <validValue name="LIMIT">1</validValue>
+            <validValue name="MARKET">2</validValue>
+        </enum>
+
+        <enum name="OrderSide" encodingType="uint8">
+            <validValue name="BUY">1</validValue>
+            <validValue name="SELL">2</validValue>
+        </enum>
+
+        <enum name="TimeInForce" encodingType="uint8">
+            <validValue name="GTC">1</validValue>
+            <validValue name="IOC">2</validValue>
+            <validValue name="FOK">3</validValue>
+            <validValue name="POST_ONLY">4</validValue>
+        </enum>
+
+        <enum name="StpStrategy" encodingType="uint8">
+            <validValue name="DEFAULT">0</validValue>
+            <validValue name="CANCEL_MAKER">1</validValue>
+            <validValue name="CANCEL_TAKER">2</validValue>
+            <validValue name="CANCEL_BOTH">3</validValue>
+        </enum>
+
+        <enum name="OrderStatus" encodingType="uint8">
+            <validValue name="NEW">1</validValue>
+            <validValue name="CANCELLED">2</validValue>
+            <validValue name="PARTIALLY_FILLED">3</validValue>
+            <validValue name="FULL_FILLED">4</validValue>
+            <validValue name="REJECTED">5</validValue>
+        </enum>
+
+        <enum name="CancelReason" encodingType="uint8">
+            <validValue name="NONE">0</validValue>
+            <validValue name="POST_ONLY_CROSS">1</validValue>
+            <validValue name="IOC_NOT_CROSS">2</validValue>
+            <validValue name="FOK_NOT_CROSS">3</validValue>
+            <validValue name="STP_CANCEL">4</validValue>
+            <validValue name="IOC_NOT_FULLFILL_CANCEL_REMAINING">5</validValue>
+            <validValue name="FOK_NOT_FULLFILL_CANCEL">6</validValue>
+        </enum>
+
+        <!-- 宏观结果类型: 1 normal / 2 error -->
+        <enum name="SystemType" encodingType="uint8">
+            <validValue name="NORMAL">1</validValue>
+            <validValue name="ERROR">2</validValue>
+        </enum>
+
+        <!-- 异常 code: 0 NONE 表示非异常占位 -->
+        <enum name="SystemErrorCode" encodingType="uint8">
+            <validValue name="NONE">0</validValue>
+            <validValue name="SERIAL_NUM_NOT_CONTINUOUS">1</validValue>
+            <validValue name="BAD_REQUEST_PARAM">2</validValue>
+            <validValue name="SYMBOL_NOT_TRADING">3</validValue>
+            <validValue name="DUPLICATE_ORDER">4</validValue>
+        </enum>
+
+        <!-- 业务类型 -->
+        <enum name="ResultBizType" encodingType="uint8">
+            <validValue name="PLACE_ORDER">1</validValue>
+            <validValue name="MATCH">2</validValue>
+            <validValue name="CANCEL">3</validValue>
+            <validValue name="SYMBOL_UP">4</validValue>
+            <validValue name="SYMBOL_DOWN">5</validValue>
+            <validValue name="TRADE_SWITCH">6</validValue>
+        </enum>
+
+        <!-- 上下币操作 op: 1=上币 LIST, 2=下币 DELIST -->
+        <enum name="SymbolOp" encodingType="uint8">
+            <validValue name="LIST">1</validValue>
+            <validValue name="DELIST">2</validValue>
+        </enum>
+
+        <!-- MatchResult 公共头: 内联到每个 result message 的固定 block 起始 -->
+        <composite name="resultCommonHeader" description="MatchResult 公共头">
+            <type name="systemType" primitiveType="uint8"/>
+            <type name="systemErrorCode" primitiveType="uint8"/>
+            <type name="resultBizType" primitiveType="uint8"/>
+            <type name="resultSerialNum" primitiveType="uint64"/>
+            <type name="requestSerialNum" primitiveType="uint64"/>
+            <type name="createTime" primitiveType="int64"/>
+        </composite>
+    </types>
+
+    <!-- ====================== 指令定义 (含 serialNum) ====================== -->
+
+    <message name="PlaceOrderCommand" id="100" description="下单指令">
+        <field name="serialNum" id="0" type="uint64"/>
+        <field name="orderId" id="1" type="uint64"/>
+        <field name="accountId" id="2" type="uint64"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="orderType" id="4" type="OrderType"/>
+        <field name="orderSide" id="5" type="OrderSide"/>
+        <field name="timeInForce" id="6" type="TimeInForce"/>
+        <field name="stpAccountId" id="7" type="uint64"/>
+        <field name="stpStrategy" id="8" type="StpStrategy"/>
+        <data name="delegatePrice" id="9" type="varStringEncoding"/>
+        <data name="delegateCount" id="10" type="varStringEncoding"/>
+        <data name="clientOid" id="11" type="varStringEncoding"/>
+    </message>
+
+    <message name="AmendOrderCommand" id="101" description="改单指令">
+        <field name="serialNum" id="0" type="uint64"/>
+        <field name="orderId" id="1" type="uint64"/>
+        <field name="symbolCode" id="2" type="uint16"/>
+        <data name="newDelegatePrice" id="3" type="varStringEncoding"/>
+        <data name="newDelegateCount" id="4" type="varStringEncoding"/>
+    </message>
+
+    <message name="CancelOrderCommand" id="102" description="撤单指令">
+        <field name="serialNum" id="0" type="uint64"/>
+        <field name="orderId" id="1" type="uint64"/>
+        <field name="symbolCode" id="2" type="uint16"/>
+    </message>
+
+    <!-- 上下币指令 (控制面命令，不参与 serialNum 连续性校验) -->
+    <message name="UpDownSymbolCommand" id="105" description="上下币指令">
+        <field name="op" id="1" type="SymbolOp"/>
+        <field name="symbolCode" id="2" type="uint16"/>
+        <field name="baseCoinId" id="3" type="uint32"/>
+        <field name="quoteCoinId" id="4" type="uint32"/>
+        <data name="symbolName" id="5" type="varStringEncoding"/>
+    </message>
+
+    <!-- 币对开关交易指令 (控制面命令，不参与 serialNum 连续性校验) -->
+    <message name="TradeSwitchCommand" id="106" description="币对开关交易指令">
+        <field name="symbolCode" id="1" type="uint16"/>
+        <field name="switchOn" id="2" type="BooleanType"/>
+    </message>
+
+    <!-- ====================== MatchResult 事件定义 ====================== -->
+
+    <!-- 挂单成功结果, resultBizType=PLACE_ORDER -->
+    <message name="PlaceOrderResult" id="200" description="挂单成功结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="orderId" id="2" type="uint64"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="orderStatus" id="4" type="OrderStatus"/>
+        <data name="symbolId" id="5" type="varStringEncoding"/>
+        <data name="delegatePrice" id="6" type="varStringEncoding"/>
+        <data name="delegateCount" id="7" type="varStringEncoding"/>
+    </message>
+
+    <!-- 撮合结果, resultBizType=MATCH -->
+    <message name="MatchOrderResult" id="201" description="撮合成交结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="orderId" id="2" type="uint64"/>
+        <field name="oppositeOrderId" id="3" type="uint64"/>
+        <field name="symbolCode" id="4" type="uint16"/>
+        <field name="orderStatus" id="5" type="OrderStatus"/>
+        <data name="symbolId" id="6" type="varStringEncoding"/>
+        <data name="tradePrice" id="7" type="varStringEncoding"/>
+        <data name="counterTradePrice" id="8" type="varStringEncoding"/>
+        <data name="tradeAmount" id="9" type="varStringEncoding"/>
+        <data name="counterTradeAmount" id="10" type="varStringEncoding"/>
+        <data name="remainingAmount" id="11" type="varStringEncoding"/>
+    </message>
+
+    <!-- 撤单结果, resultBizType=CANCEL -->
+    <message name="CancelOrderResult" id="202" description="撤单结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="orderId" id="2" type="uint64"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="orderStatus" id="4" type="OrderStatus"/>
+        <field name="cancelReason" id="5" type="CancelReason"/>
+        <data name="symbolId" id="6" type="varStringEncoding"/>
+        <data name="delegatePrice" id="7" type="varStringEncoding"/>
+        <data name="delegateCount" id="8" type="varStringEncoding"/>
+        <data name="remainingAmount" id="9" type="varStringEncoding"/>
+    </message>
+
+    <!-- 上币 / 下币结果, resultBizType=SYMBOL_UP|SYMBOL_DOWN
+         约定: symbolCode (uint16) 即 symbolId, 全局唯一; symbolName (varString) 是名字也唯一 -->
+    <message name="UpDownSymbolResult" id="203" description="上币/下币结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="op" id="2" type="SymbolOp"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="baseCoinId" id="4" type="uint32"/>
+        <field name="quoteCoinId" id="5" type="uint32"/>
+        <data name="symbolName" id="6" type="varStringEncoding"/>
+    </message>
+
+    <!-- 币对开关结果, resultBizType=TRADE_SWITCH -->
+    <message name="TradeSwitchResult" id="204" description="币对交易开关结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="symbolCode" id="2" type="uint16"/>
+        <field name="switchOn" id="3" type="BooleanType"/>
+        <data name="symbolId" id="4" type="varStringEncoding"/>
+    </message>
+</messageSchema>

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Laser 撮合引擎 — Sprint1+2+3 架构文档</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <style>
+        body { padding-top: 4.5rem; }
+        #sidebar {
+            position: fixed; top: 4.5rem; bottom: 0; left: 0; width: 240px;
+            padding: 1rem; overflow-y: auto; border-right: 1px solid #dee2e6;
+            background: #f8f9fa;
+        }
+        #content { margin-left: 260px; padding: 1rem 2rem; max-width: 980px; }
+        #content h2 { margin-top: 2.5rem; padding-top: 4.5rem; margin-top: -2rem; }
+        #content h3 { margin-top: 2rem; }
+        .nav-link { color: #495057; padding: .35rem .5rem; }
+        .nav-link.active { color: #0d6efd; font-weight: 600; }
+        pre { background: #f6f8fa; padding: .75rem 1rem; border-radius: .375rem; }
+        .mermaid { background: #fff; padding: .5rem; border: 1px solid #e9ecef; border-radius: .375rem; }
+        #backToTop {
+            position: fixed; bottom: 1.5rem; right: 1.5rem; display: none; z-index: 1030;
+        }
+        table { font-size: .92rem; }
+        .badge-event { font-family: monospace; }
+    </style>
+</head>
+<body data-bs-spy="scroll" data-bs-target="#sidebar" data-bs-offset="80" tabindex="0">
+
+<nav class="navbar fixed-top navbar-light bg-light border-bottom">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">⚡ Laser 撮合引擎 — 架构文档 v1.2 (Sprint1 + Sprint2 + Sprint3)</span>
+    </div>
+</nav>
+
+<aside id="sidebar">
+    <nav class="nav flex-column">
+        <a class="nav-link" href="#overview">总览</a>
+        <a class="nav-link" href="#part1">Part 1 · Request 连续性</a>
+        <a class="nav-link" href="#part2">Part 2 · MatchResult 体系</a>
+        <a class="nav-link" href="#part3">Part 3 · resultRepoModule</a>
+        <a class="nav-link" href="#part4">Part 4 · 撮合过程集成</a>
+        <a class="nav-link" href="#part5">Part 5 · 快照模块</a>
+        <a class="nav-link" href="#snapshot-manual">Part 5b · 手动快照触发</a>
+        <a class="nav-link" href="#part6">Part 6 · MDC 广播 (Sprint 3)</a>
+        <a class="nav-link" href="#decouple">Part 7 · 依赖解耦 ClusterRoleHolder</a>
+        <a class="nav-link" href="#determinism">确定性约束</a>
+        <a class="nav-link" href="#tests">测试覆盖</a>
+        <a class="nav-link" href="#runbook">运维手册</a>
+    </nav>
+</aside>
+
+<main id="content">
+
+<h2 id="overview">总览</h2>
+<p>本次迭代为撮合引擎补齐四块基础能力：<strong>Request 连续性校验</strong> · <strong>MatchResult 事件体系</strong> · <strong>结果持久化</strong> · <strong>状态快照与恢复</strong>。所有改动均建立在 Aeron Cluster 状态机之上，严格保证回放确定性。</p>
+
+<div class="mermaid">
+flowchart LR
+  Client[laser-mock-counter<br/>RequestSerialNumGenerator] -->|SBE+serialNum| Cluster[Aeron Cluster Ingress]
+  Cluster --> Dispatcher[CommandDispatcher]
+  Dispatcher -->|validate| Validator[SerialNumValidator]
+  Dispatcher -->|begin/end| Helper[MatchResultEventsHelper]
+  Dispatcher --> Engine[MatchEngine]
+  Engine -->|append events| Helper
+  Helper -->|batch| Repo[ResultRepository]
+  Repo -->|SBE| Archive[Aeron Archive<br/>streamId=1001]
+  ClusterTool[ClusterTool.snapshot] --> ConsensusModule
+  Scheduler[SnapshotScheduler<br/>每 5min] --> ClusterTool
+  RestApi[SnapshotController<br/>POST /snapshot/trigger] --> ClusterTool
+  ConsensusModule -->|onTakeSnapshot| ClusteredService[MatchEngineClusteredService]
+  ClusteredService --> SnapManager[SnapshotManager]
+  SnapManager -->|SBE| SnapPub[SnapshotPublication]
+</div>
+
+<h3>核心约束</h3>
+<ul>
+    <li>所有时间戳来自 Aeron Cluster 共识时钟，严禁 <code>System.currentTimeMillis()</code></li>
+    <li>状态机线程内禁用 <code>AtomicLong</code> / synchronized；普通 <code>long</code> 直接 +1</li>
+    <li>事件序列固定顺序：<code>PLACE → MATCH×N → CANCEL?</code></li>
+    <li>resultSerialNum 跨 symbol 全局单调递增，无跳号</li>
+</ul>
+
+<h2 id="part1">Part 1 · Request 连续性校验</h2>
+<p>客户端按 <code>serialNum=1,2,3,...</code> 发送，服务端入口校验 <code>newSerialNum == lastSerialNum + 1</code>。不连续即丢包，生成 <code>SystemErrorCode=SERIAL_NUM_NOT_CONTINUOUS</code> 的错误结果。</p>
+
+<h3>类继承结构</h3>
+<div class="mermaid">
+classDiagram
+    class AbstractRequest {
+        <<abstract>>
+        -long serialNum
+        +encode(buffer, offset)
+        +decode(buffer, offset)
+    }
+    AbstractRequest <|-- PlaceOrderRequest
+    AbstractRequest <|-- AmendOrderRequest
+    AbstractRequest <|-- CancelOrderRequest
+</div>
+
+<h3>SBE Schema 演进</h3>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>Command</th><th>v0 字段</th><th>v1 新增</th></tr></thead>
+    <tbody>
+    <tr><td>PlaceOrderCommand (id=100)</td><td>orderId, accountId, ...</td><td><code>serialNum uint64</code> (id=0, 头部)</td></tr>
+    <tr><td>AmendOrderCommand (id=101)</td><td>orderId, symbolCode, ...</td><td><code>serialNum uint64</code></td></tr>
+    <tr><td>CancelOrderCommand (id=102)</td><td>orderId, symbolCode</td><td><code>serialNum uint64</code></td></tr>
+    </tbody>
+</table>
+
+<h3>校验流程</h3>
+<div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Client as laser-mock-counter
+    participant Disp as CommandDispatcher
+    participant Val as SerialNumValidator
+    participant Eng as MatchEngine
+    participant Repo as ResultRepository
+
+    Client->>Disp: SBE Request (serialNum=N)
+    Disp->>Val: validateAndAdvance(N)
+    alt N == lastSerialNum + 1
+        Val-->>Disp: true
+        Disp->>Eng: place/amend/cancel
+        Eng-->>Disp: events
+        Disp->>Repo: persist(events)
+    else N != lastSerialNum + 1
+        Val-->>Disp: false (log.error)
+        Disp->>Repo: persist([ErrorMatchResult])
+    end
+</div>
+
+<h3>开关</h3>
+<pre><code># application.properties
+laser.matching.validation.serial-check-enabled=true   # 生产严格
+laser.matching.validation.serial-check-enabled=false  # 测试跳过</code></pre>
+
+<h2 id="part2">Part 2 · MatchResult 事件体系</h2>
+<p>5 类事件 + 统一公共头：<strong>PlaceOrderResult / MatchOrderResult / CancelOrderResult / UpDownSymbolResult / TradeSwitchResult</strong>。所有事件均直接生成 SBE 字节流。</p>
+
+<h3>公共头字段</h3>
+<table class="table table-sm">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody>
+    <tr><td><code>systemType</code></td><td>uint8</td><td>1=NORMAL, 2=ERROR</td></tr>
+    <tr><td><code>systemErrorCode</code></td><td>uint8</td><td>0=NONE, 1=SERIAL_NUM_NOT_CONTINUOUS, 2=BAD_REQUEST_PARAM, 3=SYMBOL_NOT_TRADING, 4=DUPLICATE_ORDER</td></tr>
+    <tr><td><code>resultBizType</code></td><td>uint8</td><td>1=PLACE_ORDER, 2=MATCH, 3=CANCEL, 4=SYMBOL_UP, 5=SYMBOL_DOWN, 6=TRADE_SWITCH</td></tr>
+    <tr><td><code>resultSerialNum</code></td><td>uint64</td><td>跨 symbol 全局单调 +1</td></tr>
+    <tr><td><code>requestSerialNum</code></td><td>uint64</td><td>触发本结果的 request 序号</td></tr>
+    <tr><td><code>createTime</code></td><td>int64</td><td>Aeron Cluster 共识时间戳</td></tr>
+    </tbody>
+</table>
+
+<h3>EventsHelper 工作流</h3>
+<div class="mermaid">
+sequenceDiagram
+    participant Disp as CommandDispatcher
+    participant Helper as MatchResultEventsHelper
+    participant Engine as MatchEngine
+    participant Repo as ResultRepository
+
+    Disp->>Helper: beginRequest(reqSeq, consensusTs)
+    Disp->>Engine: placeOrder(...)
+    Engine->>Helper: appendPlaceOrder(order)
+    Engine->>Helper: appendMatch(taker, maker, price, qty, remaining, status)
+    Engine->>Helper: appendMatch(...)
+    Engine->>Helper: appendCancel(...)  [可选]
+    Disp->>Helper: endRequest()
+    Helper-->>Disp: List&lt;MatchResult&gt;
+    Disp->>Repo: persist(batch)
+</div>
+
+<h3>事件顺序铁律</h3>
+<p class="text-warning"><strong>挂单事件必须最先生成</strong>。违反顺序的下游对账会无法处理。</p>
+<pre><code>PLACE → MATCH × N → CANCEL?
+</code></pre>
+
+<h2 id="part3">Part 3 · resultRepoModule 持久化</h2>
+<p>抽象 <code>ResultRepository</code> + 两套实现：<code>InMemoryResultRepository</code>（测试）与 <code>ArchiveResultRepository</code>（生产）。生产实现复用 Aeron Cluster 内置 Archive，独立 streamId (默认 <code>1001</code>) 隔离 raftlog/snapshot 流。</p>
+
+<div class="mermaid">
+flowchart TD
+  Helper[MatchResultEventsHelper] -->|List&lt;MatchResult&gt;| Repo[ResultRepository接口]
+  Repo --> Mem[InMemoryResultRepository<br/>单元测试]
+  Repo --> Archive[ArchiveResultRepository<br/>生产环境]
+  Archive -->|ExclusivePublication.offer| Aeron[Aeron Archive<br/>streamId=1001]
+</div>
+
+<h3>背压策略</h3>
+<p>Archive offer 返回 <code>BACK_PRESSURED</code> / <code>NOT_CONNECTED</code> 时 busy-spin (Thread.onSpinWait + 偶发 parkNanos(1))，状态机线程内严禁 sleep / wait。</p>
+
+<h2 id="part4">Part 4 · 撮合过程集成</h2>
+<p>MatchEngine 在 4 个关键节点调用 EventsHelper.appendXxx：</p>
+
+<div class="mermaid">
+sequenceDiagram
+    participant Disp as CommandDispatcher
+    participant Eng as MatchEngine
+    participant H as EventsHelper
+
+    Disp->>Eng: placeOrder(taker)
+    Eng->>H: appendPlaceOrder(taker)  ← 事件0 (status=NEW)
+    Eng->>Eng: tryMatchInstantly()
+    loop each maker matched
+        Eng->>H: appendMatch(taker, maker, price, qty, remaining, status)
+    end
+    alt POST_ONLY 交叉 / IOC 不交叉 / IOC 部分剩余
+        Eng->>H: appendCancel(taker, reason)
+    end
+</div>
+
+<h3>事件矩阵</h3>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>场景</th><th>事件序列</th></tr></thead>
+    <tbody>
+    <tr><td>GTC 无对手</td><td><code>[PLACE]</code></td></tr>
+    <tr><td>GTC 部分成交挂剩余</td><td><code>[PLACE, MATCH]</code></td></tr>
+    <tr><td>GTC 跨档完全成交</td><td><code>[PLACE, MATCH, MATCH, ...]</code></td></tr>
+    <tr><td>POST_ONLY 交叉</td><td><code>[PLACE, CANCEL(POST_ONLY_CROSS)]</code></td></tr>
+    <tr><td>IOC 不交叉</td><td><code>[PLACE, CANCEL(IOC_NOT_CROSS)]</code></td></tr>
+    <tr><td>IOC 部分成交后撤剩</td><td><code>[PLACE, MATCH, CANCEL(IOC_NOT_FULLFILL)]</code></td></tr>
+    <tr><td>用户主动撤单</td><td><code>[CANCEL(NONE)]</code></td></tr>
+    </tbody>
+</table>
+
+<h2 id="part5">Part 5 · 快照模块</h2>
+
+<h3>三路触发</h3>
+<div class="mermaid">
+flowchart LR
+  S1[SnapshotScheduler<br/>定时5min @Scheduled] -->|ClusterTool.snapshot| CM[ConsensusModule<br/>mark file IPC]
+  S2[SnapshotController<br/>POST /snapshot/trigger] -->|leader校验| CM
+  S3[运维 CLI<br/>aeron-cluster ClusterTool] -->|外部| CM
+  CM -->|onTakeSnapshot ExclusivePublication| CS[ClusteredService]
+  CS --> SM[SnapshotManager.takeSnapshot]
+  SM -->|SBE消息流| Pub[Aeron Publication]
+</div>
+
+<h3>快照 SBE Schema (独立 schema id=3)</h3>
+<table class="table table-sm">
+    <thead><tr><th>Message</th><th>id</th><th>用途</th></tr></thead>
+    <tbody>
+    <tr><td>SnapshotHeader</td><td>300</td><td>maxProcessedRequestSerialNum / maxResultSerialNum / takenAt</td></tr>
+    <tr><td>SymbolConfigEntry</td><td>301</td><td>每个币对配置</td></tr>
+    <tr><td>OrderBookStart</td><td>302</td><td>OrderBook 起始标记 + symbolCode + orderCount</td></tr>
+    <tr><td>MatchOrderEntry</td><td>303</td><td>订单簿中的一个订单（含 dealtCount/status/createTime）</td></tr>
+    <tr><td>SymbolSerialNumEntry</td><td>304</td><td>per-symbol serialNum</td></tr>
+    <tr><td>SnapshotFooter</td><td>399</td><td>entry 计数 + checksum</td></tr>
+    </tbody>
+</table>
+
+<h3>恢复流程</h3>
+<div class="mermaid">
+sequenceDiagram
+    participant CS as MatchEngineClusteredService
+    participant SM as SnapshotManager
+    participant Img as SnapshotImage
+    participant State as MatchEngineState
+    participant Val as SerialNumValidator
+    participant H as EventsHelper
+    participant Repo as ResultRepository
+
+    Note over CS: cluster.onStart(snapshotImage)
+    CS->>SM: loadSnapshot(state, val, helper, repo, reader)
+    loop SnapshotReader.readOne
+        Img->>SM: SBE message
+        alt SnapshotHeader
+            SM->>SM: 记录 maxReq/maxRes
+        else SymbolConfigEntry
+            SM->>State: addSymbol + addMatchConfig
+        else OrderBookStart
+            SM->>State: new OrderBook
+        else MatchOrderEntry
+            SM->>State: book.addOrder (直接写, 不触发撮合)
+        end
+    end
+    SM->>Val: restoreLastSerialNum(maxReq)
+    SM->>Repo: getMaxResultSerialNum()
+    Repo-->>SM: repoMax
+    SM->>H: restoreNextResultSerialNum(max(snapMax, repoMax) + 1)
+</div>
+
+<h3>关键决策：恢复时为什么不调用 engine.placeOrder？</h3>
+<p>因为快照是 <strong>state serialization</strong>，不是 <strong>event replay</strong>。直接 <code>orderBook.addOrder(...)</code> 才能：</p>
+<ul>
+    <li>保留每个订单的 <code>dealtCount</code>（部分成交历史）</li>
+    <li>避免恢复中途产生的瞬时交叉触发重复撮合</li>
+    <li>避免 POST_ONLY 在恢复中被误撤、市价单被误入队</li>
+    <li>避免 EventsHelper 重复生成 PLACE 事件膨胀 resultSerialNum</li>
+</ul>
+<p>Aeron Cluster 模型 = <code>snapshot 恢复状态</code> + <code>raftlog catchup 重放后续 request</code>，二者职责严格分离。</p>
+
+<h3>serialNum reconcile</h3>
+<div class="mermaid">
+flowchart TD
+  Snap[snapshot.maxResultSerialNum] -->|比较| Pick{取较大者}
+  RepoMax[ArchiveResultRepository.getMaxResultSerialNum] -->|比较| Pick
+  Pick -->|+1| Next[EventsHelper.nextResultSerialNum]
+</div>
+
+<h2 id="snapshot-manual">Part 5b · 手动快照触发 (Sprint 3 新增)</h2>
+<p>除定时快照外，Sprint 3 补齐了两种手动触发通道：</p>
+
+<h3>通道 A: HTTP REST</h3>
+<pre><code>curl -X POST http://localhost:8080/snapshot/trigger
+
+# LEADER 响应 (HTTP 200)
+{"output":"Member [0]: SNAPSHOT applied successfully","role":"LEADER","success":true,"memberId":0}
+
+# FOLLOWER 响应 (HTTP 423 LOCKED)
+{"success":false,"role":"FOLLOWER","message":"only leader can take snapshot"}</code></pre>
+
+<h3>通道 B: cluster.sh CLI</h3>
+<pre><code>./cluster.sh snapshot        # 默认对 node-0
+./cluster.sh snapshot 1      # 对 node-1 (如果是 LEADER)
+./cluster.sh help            # 列出全部命令</code></pre>
+
+<h3>手动快照内部流程</h3>
+<div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant User as 运维
+    participant Ctrl as SnapshotController
+    participant Role as ClusterRoleHolder
+    participant Tool as ClusterTool
+    participant CM as ConsensusModule
+    participant CS as ClusteredService
+    participant SM as SnapshotManager
+
+    User->>Ctrl: POST /snapshot/trigger
+    Ctrl->>Role: isLeader()
+    alt FOLLOWER
+        Role-->>Ctrl: false
+        Ctrl-->>User: 423 LOCKED
+    else LEADER
+        Role-->>Ctrl: true
+        Ctrl->>Tool: ClusterTool.snapshot(consensusDir)
+        Tool->>CM: 通过 mark file IPC 发送 snapshot 指令
+        CM->>CS: onTakeSnapshot(ExclusivePublication)
+        CS->>SM: takeSnapshot(state, maxReq, maxRes, ts, writer)
+        SM-->>CS: entryCount
+        CS-->>CM: ack
+        CM-->>Tool: SNAPSHOT applied successfully
+        Tool-->>Ctrl: true
+        Ctrl-->>User: 200 OK + output
+    end
+</div>
+
+<h2 id="part6">Part 6 · MatchResult MDC 广播 (Sprint 3)</h2>
+<p>MDC = Multi-Destination-Control，Aeron 的动态广播通道。撮合 LEADER 把每条 <code>MatchResult</code> 通过 UDP MDC publication 推给订阅者（mock-counter / 清算 / 风控）。</p>
+
+<h3>拓扑与端口规则</h3>
+<table class="table table-sm">
+    <thead><tr><th>节点</th><th>MDC control 端口</th><th>客户端 subscriber 端口</th></tr></thead>
+    <tbody>
+    <tr><td>node-0</td><td><code>40456</code> (base + 0)</td><td><code>40500</code></td></tr>
+    <tr><td>node-1</td><td><code>40457</code> (base + 1)</td><td><code>40501</code></td></tr>
+    <tr><td>node-2</td><td><code>40458</code> (base + 2)</td><td><code>40502</code></td></tr>
+    </tbody>
+</table>
+
+<h3>数据流</h3>
+<div class="mermaid">
+flowchart LR
+  subgraph Leader["LEADER 节点"]
+    Dispatcher[CommandDispatcher]
+    Role[ClusterRoleHolder]
+    Repo[ArchiveResultRepository<br/>每节点都写]
+    Broadcaster[ResultMdcBroadcaster<br/>仅 LEADER]
+  end
+
+  subgraph Follower["FOLLOWER 节点"]
+    Repo2[ArchiveResultRepository<br/>每节点都写]
+    BCOff[Broadcaster<br/>skip by isLeader check]
+  end
+
+  Dispatcher --> Repo
+  Dispatcher -->|isLeader?| Role
+  Dispatcher -.-> Broadcaster
+  Broadcaster -->|UDP MDC aeron:udp?control=...| MockCounter[mock-counter<br/>ResultMdcSubscriber]
+  MockCounter --> Log[SBE 解码 → MDC-RESULT 日志]
+</div>
+
+<h3>关键不变量</h3>
+<ul>
+    <li><strong>所有节点</strong>都执行 <code>resultRepository.persist()</code>（状态机确定性）</li>
+    <li><strong>仅 LEADER</strong> 执行 <code>broadcaster.broadcastBatch()</code>（避免 3 副本重复）</li>
+    <li>FOLLOWER 的 broadcaster publication 也会绑定端口（冷备），role 切换后立即可用</li>
+</ul>
+
+<h3>升级思路 (Sprint 4 候选)</h3>
+<p>当前 MDC 是 <strong>live broadcast</strong>（撮合完成后直接推）。未来可单独抽出进程，从 archive 异步 replay 到 MDC，支持历史回放 / 断线补发场景。</p>
+
+<h2 id="decouple">Part 7 · 依赖解耦 · ClusterRoleHolder (Sprint 3)</h2>
+
+<h3>问题：循环依赖</h3>
+<p>初版实现中 <code>CommandDispatcher</code> 为判断 LEADER 直接注入整个 <code>MatchEngineClusteredService</code>，Spring 启动报错：</p>
+<pre><code>The dependencies of some of the beans ... form a cycle:
+  clusterNodeBoot
+┌─────┐
+|  matchEngineClusteredService
+↑     ↓
+|  commandDispatcher
+└─────┘</code></pre>
+
+<h3>重构：单向数据流</h3>
+<div class="mermaid">
+flowchart LR
+  CS[ClusteredService<br/>onStart/onRoleChange] -->|write| RH[ClusterRoleHolder<br/>volatile Role]
+  CS -->|调用入口| CD[CommandDispatcher]
+  CD -->|read isLeader| RH
+  SS[SnapshotScheduler] -->|read| RH
+  SC[SnapshotController] -->|read| RH
+</div>
+
+<h3>底层逻辑</h3>
+<p>CommandDispatcher 只需知道 <em>当前是不是 LEADER</em>，而非整个 ClusteredService。抽出 <code>ClusterRoleHolder</code> 这个轻量组件后：</p>
+<ul>
+    <li>写入端（ClusteredService）单一；读取端（Dispatcher / Scheduler / Controller）多个；职责解耦</li>
+    <li>依赖箭头单向，编码层面完全消除循环</li>
+    <li>符合接口隔离原则（ISP），颗粒度合适</li>
+</ul>
+
+<h2 id="determinism">确定性约束总览</h2>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>类</th><th>禁用</th><th>替代</th></tr></thead>
+    <tbody>
+    <tr><td>SerialNumValidator</td><td>AtomicLong</td><td>普通 long + 1</td></tr>
+    <tr><td>MatchResultEventsHelper</td><td>AtomicLong / System.currentTimeMillis</td><td>普通 long; cluster.time()</td></tr>
+    <tr><td>ArchiveResultRepository</td><td>park/sleep/wait</td><td>Thread.onSpinWait()</td></tr>
+    <tr><td>SnapshotManager</td><td>HashMap 遍历(顺序不确定)</td><td>按 SBE 消息顺序写出</td></tr>
+    </tbody>
+</table>
+
+<h2 id="tests">测试覆盖</h2>
+<p>共 <strong>189 个测试</strong>，全绿。</p>
+
+<table class="table table-sm">
+    <thead><tr><th>模块</th><th>测试数</th><th>关键场景</th></tr></thead>
+    <tbody>
+    <tr><td>SerialNumValidatorTest</td><td>7</td><td>+1 / 跳号 / 倒退 / 开关 / 快照恢复</td></tr>
+    <tr><td>MatchResultEventsHelperTest</td><td>10</td><td>各 biz type / 跨 symbol 全局自增 / 时间戳来源</td></tr>
+    <tr><td>InMemoryResultRepositoryTest</td><td>6</td><td>顺序 / 重复 / immutable</td></tr>
+    <tr><td>MatchResultSbeRoundTripTest</td><td>5</td><td>5 类 result SBE 编解码往返</td></tr>
+    <tr><td>RequestSerialNumRoundTripTest</td><td>2</td><td>serialNum 编解码完整</td></tr>
+    <tr><td>SnapshotManagerTest</td><td>8</td><td>codec / 多 symbol / FIFO 顺序 / <strong>快照前后 bit-for-bit 一致</strong> / serialNum reconcile 三场景</td></tr>
+    <tr><td>MatchEventOrderTest</td><td>8</td><td>事件顺序: PLACE→MATCH→CANCEL</td></tr>
+    <tr><td>PlaceOrderEventFirstInvariantTest</td><td>13</td><td>PLACE 永远是 events[0] 不变量 (10 大场景穷举)</td></tr>
+    <tr><td>已有 OrderBookTest / FokOrderProcessorTest / StpStrategyServiceTest / MatchEngineTest</td><td>130</td><td>原有功能回归</td></tr>
+    </tbody>
+</table>
+
+<h2 id="runbook">运维手册</h2>
+
+<h3>启动单节点 cluster</h3>
+<pre><code>cd /Users/snowalker/develop/laser-matching-engine
+./cluster.sh start-single   # nodeId=0, 立即成为 LEADER, 端口 8080</code></pre>
+
+<h3>启动客户端</h3>
+<pre><code>cd /Users/snowalker/develop/laser-mock-counter
+./client.sh start          # 端口 10880</code></pre>
+
+<h3>批量下单</h3>
+<pre><code>./client.sh batch-start 100 1 50000 1.5    # 100/s 持续发单
+./client.sh batch-stop                      # 停止
+./client.sh batch-status                    # 查看统计</code></pre>
+
+<h3>触发手动快照</h3>
+<pre><code>curl -X POST http://localhost:8080/snapshot/trigger</code></pre>
+
+<h3>命令行触发快照 (运维)</h3>
+<pre><code># 方式 A: 使用 cluster.sh (推荐)
+./cluster.sh snapshot           # 默认 node-0
+./cluster.sh snapshot 1         # 对 node-1
+
+# 方式 B: 原生 Aeron ClusterTool
+java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+     --add-opens java.base/java.util.zip=ALL-UNNAMED \
+     -cp aeron-all.jar io.aeron.cluster.ClusterTool \
+     /tmp/laser/node-0/consensus snapshot</code></pre>
+
+<h3>验证 serialNum 连续性</h3>
+<pre><code>grep "handlePlace serialNum=" /tmp/laser/logs/node-0.log \
+  | awk -F 'serialNum=' '{print $2}' | awk -F',' '{print $1}' \
+  | awk 'BEGIN{last=0;gaps=0} {if($1!=last+1){gaps++;print "GAP"} last=$1} END{print "total="NR" gaps="gaps}'</code></pre>
+
+</main>
+
+<button id="backToTop" class="btn btn-primary rounded-circle shadow" title="回到顶部">↑</button>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { htmlLabels: true } });
+
+    const btn = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => {
+        btn.style.display = window.scrollY > 300 ? 'block' : 'none';
+    });
+    btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

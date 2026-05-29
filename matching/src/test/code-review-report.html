@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Matching Engine 代码审查报告</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; width: 240px; height: 100vh;
+            overflow-y: auto; background: #1a1d21; padding: 1rem 0; z-index: 100;
+        }
+        .sidebar .nav-link { color: #adb5bd; font-size: 0.85rem; padding: 0.4rem 1.2rem; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { color: #fff; background: rgba(255,255,255,.1); }
+        .sidebar .nav-header { color: #6c757d; font-size: 0.7rem; font-weight: 600; padding: 1rem 1.2rem 0.3rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .main-content { margin-left: 240px; padding: 2rem 3rem; max-width: 1200px; }
+        .stat-card { border-left: 4px solid; border-radius: 0.5rem; transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-card.success { border-left-color: #198754; }
+        .stat-card.primary { border-left-color: #0d6efd; }
+        .stat-card.warning { border-left-color: #ffc107; }
+        .stat-card.danger { border-left-color: #dc3545; }
+        .stat-card.info { border-left-color: #0dcaf0; }
+        #backToTop {
+            position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+            width: 48px; height: 48px; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+        }
+        .mermaid { display: flex; justify-content: center; margin: 1.5rem 0; }
+        h2 { font-size: 1.5rem; font-weight: 600; color: #212529; }
+        h3 { font-size: 1.25rem; font-weight: 600; color: #495057; }
+        h4 { font-size: 1.1rem; font-weight: 600; color: #6c757d; }
+        .badge-score { font-size: 1rem; padding: 0.5rem 1rem; }
+        pre.code-block { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 0.5rem; padding: 1rem; font-size: 0.85rem; }
+        .highlight-good { background: #d1e7dd; }
+        .highlight-warn { background: #fff3cd; }
+        .highlight-bad { background: #f8d7da; }
+        .toc-number { color: #6c757d; margin-right: 0.5rem; }
+        .section-divider { border-top: 3px solid #0d6efd; margin: 3rem 0 2rem; padding-top: 1rem; }
+        .architecture-box { border: 2px solid #dee2e6; border-radius: 0.5rem; padding: 1.5rem; margin: 1rem 0; background: #fff; }
+        .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 768px) { .pros-cons { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+
+<!-- 左侧导航栏 -->
+<nav class="sidebar">
+    <div class="px-3 mb-2">
+        <h6 class="text-white mb-0">Laser Matching Engine</h6>
+        <small class="text-secondary">代码审查报告 v1.0</small>
+    </div>
+    <hr class="text-secondary mx-3 my-2">
+
+    <div class="nav-header">概览</div>
+    <a class="nav-link" href="#summary">执行摘要</a>
+    <a class="nav-link" href="#scores">评分总览</a>
+
+    <div class="nav-header">功能分析</div>
+    <a class="nav-link" href="#func-order">订单类型支持</a>
+    <a class="nav-link" href="#func-matching">撮合算法</a>
+    <a class="nav-link" href="#func-stp">自成交保护</a>
+    <a class="nav-link" href="#func-lifecycle">订单生命周期</a>
+
+    <div class="nav-header">架构设计</div>
+    <a class="nav-link" href="#arch-overview">整体架构</a>
+    <a class="nav-link" href="#arch-modules">模块划分</a>
+    <a class="nav-link" href="#arch-patterns">设计模式</a>
+    <a class="nav-link" href="#arch-data">数据结构</a>
+    <a class="nav-link" href="#arch-perf">性能优化</a>
+
+    <div class="nav-header">代码质量</div>
+    <a class="nav-link" href="#quality-test">测试覆盖</a>
+    <a class="nav-link" href="#quality-code">代码规范</a>
+    <a class="nav-link" href="#quality-error">异常处理</a>
+    <a class="nav-link" href="#quality-log">日志设计</a>
+
+    <div class="nav-header">深度分析</div>
+    <a class="nav-link" href="#deep-core">核心类分析</a>
+    <a class="nav-link" href="#deep-risk">风险点识别</a>
+    <a class="nav-link" href="#deep-improve">改进建议</a>
+
+    <div class="nav-header">附录</div>
+    <a class="nav-link" href="#appendix-deps">依赖分析</a>
+    <a class="nav-link" href="#appendix-files">文件清单</a>
+</nav>
+
+<!-- 主内容区 -->
+<div class="main-content" id="top">
+
+    <h1 class="mb-1">Laser Matching Engine</h1>
+    <h2 class="text-muted fw-normal mb-4" style="font-size: 1.25rem;">代码审查报告</h2>
+    <p class="text-muted">审查日期: 2026-02-03 | 版本: 1.0 | 审查人: Claude Code</p>
+
+    <!-- ==================== 执行摘要 ==================== -->
+    <section id="summary" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">执行摘要</h2>
+
+        <div class="alert alert-primary">
+            <h5 class="alert-heading">项目概述</h5>
+            <p class="mb-0">
+                <strong>Laser Matching Engine</strong> 是一个高性能的金融交易撮合引擎，基于 Java 17 构建，
+                采用 Aeron Cluster 实现分布式共识，支持多种订单类型和自成交保护机制。
+                代码质量优良，测试覆盖全面，适合作为生产级撮合系统的基础。
+            </p>
+        </div>
+
+        <div class="row g-3 mt-3">
+            <div class="col-md-4">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">综合评分</div>
+                    <div class="fs-2 fw-bold text-success">A</div>
+                    <div class="small">85/100 分</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card primary p-3">
+                    <div class="text-muted small">代码行数</div>
+                    <div class="fs-2 fw-bold text-primary">~3,500</div>
+                    <div class="small">核心业务代码</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card info p-3">
+                    <div class="text-muted small">测试用例</div>
+                    <div class="fs-2 fw-bold text-info">131+</div>
+                    <div class="small">核心覆盖率 98%</div>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">关键发现</h4>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white">优势</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">完整支持 GTC/IOC/FOK/POST_ONLY 四种订单类型</li>
+                        <li class="list-group-item">FOK 两阶段撮合设计精巧，保证原子性</li>
+                        <li class="list-group-item">自成交保护 (STP) 策略完善，覆盖三种模式</li>
+                        <li class="list-group-item">采用 Agrona 高性能数据结构</li>
+                        <li class="list-group-item">测试覆盖率高，边界场景考虑充分</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning">待改进</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">市价单挂单逻辑 (TODO) 未完成</li>
+                        <li class="list-group-item">缺少订单修改 (amendOrder) 的完整实现</li>
+                        <li class="list-group-item">日志中打印完整 JSON 影响性能</li>
+                        <li class="list-group-item">部分魔法数字未抽取为常量</li>
+                        <li class="list-group-item">缺少性能基准测试</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 评分总览 ==================== -->
+    <section id="scores" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">评分总览</h2>
+
+        <pre class="mermaid">
+xychart-beta
+    title "各维度评分 (满分100)"
+    x-axis ["功能完整性", "架构设计", "代码质量", "测试覆盖", "可维护性", "性能考量"]
+    y-axis "分数" 0 --> 100
+    bar [85, 88, 82, 90, 80, 85]
+        </pre>
+
+        <table class="table table-bordered mt-4">
+            <thead class="table-dark">
+                <tr><th>维度</th><th>分数</th><th>等级</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>功能完整性</td>
+                    <td><span class="badge bg-success badge-score">85</span></td>
+                    <td>优秀</td>
+                    <td>核心撮合功能完整，市价单挂单待完善</td>
+                </tr>
+                <tr>
+                    <td>架构设计</td>
+                    <td><span class="badge bg-success badge-score">88</span></td>
+                    <td>优秀</td>
+                    <td>分层清晰，模式运用合理，扩展性良好</td>
+                </tr>
+                <tr>
+                    <td>代码质量</td>
+                    <td><span class="badge bg-success badge-score">82</span></td>
+                    <td>良好</td>
+                    <td>整体规范，部分方法过长需拆分</td>
+                </tr>
+                <tr>
+                    <td>测试覆盖</td>
+                    <td><span class="badge bg-success badge-score">90</span></td>
+                    <td>优秀</td>
+                    <td>核心模块 100% 分支覆盖，边界场景充分</td>
+                </tr>
+                <tr>
+                    <td>可维护性</td>
+                    <td><span class="badge bg-primary badge-score">80</span></td>
+                    <td>良好</td>
+                    <td>注释适中，部分复杂逻辑需要更多文档</td>
+                </tr>
+                <tr>
+                    <td>性能考量</td>
+                    <td><span class="badge bg-success badge-score">85</span></td>
+                    <td>优秀</td>
+                    <td>数据结构选择合理，日志需优化</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 功能分析 - 订单类型 ==================== -->
+    <section id="func-order" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">功能分析 - 订单类型支持</h2>
+
+        <pre class="mermaid">
+mindmap
+    root((订单类型))
+        限价单 LIMIT
+            GTC 持续有效
+            IOC 立即成交或取消
+            FOK 全部成交或取消
+            POST_ONLY 只做Maker
+        市价单 MARKET
+            立即撮合
+            挂单等待 TODO
+        </pre>
+
+        <h4 class="mt-4">订单类型对比</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>类型</th><th>价格</th><th>成交策略</th><th>未成交处理</th><th>实现状态</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>GTC</code></td>
+                    <td>指定价格</td>
+                    <td>价格交叉时撮合</td>
+                    <td>挂单等待</td>
+                    <td><span class="badge bg-success">完整</span></td>
+                </tr>
+                <tr>
+                    <td><code>IOC</code></td>
+                    <td>指定价格</td>
+                    <td>立即撮合可成交部分</td>
+                    <td>撤销剩余</td>
+                    <td><span class="badge bg-success">完整</span></td>
+                </tr>
+                <tr>
+                    <td><code>FOK</code></td>
+                    <td>指定价格</td>
+                    <td>必须全部成交</td>
+                    <td>全部撤销</td>
+                    <td><span class="badge bg-success">完整</span></td>
+                </tr>
+                <tr>
+                    <td><code>POST_ONLY</code></td>
+                    <td>指定价格</td>
+                    <td>拒绝立即成交</td>
+                    <td>挂单或撤销</td>
+                    <td><span class="badge bg-success">完整</span></td>
+                </tr>
+                <tr>
+                    <td><code>MARKET</code></td>
+                    <td>市场最优价</td>
+                    <td>立即撮合</td>
+                    <td>挂单等待</td>
+                    <td><span class="badge bg-warning text-dark">部分</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-info mt-3">
+            <strong>FOK 两阶段设计亮点:</strong>
+            <ol class="mb-0 mt-2">
+                <li><strong>Phase 1 (预撮合):</strong> 使用订单深拷贝模拟成交，不修改订单簿</li>
+                <li><strong>Phase 2 (真实撮合):</strong> 确认可完全成交后，执行实际撮合</li>
+            </ol>
+            这种设计确保了 FOK 的原子性语义，避免部分成交后回滚的复杂性。
+        </div>
+    </section>
+
+    <!-- ==================== 功能分析 - 撮合算法 ==================== -->
+    <section id="func-matching" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">功能分析 - 撮合算法</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    subgraph 入口
+        A[placeOrder] --> B{订单类型}
+    end
+
+    subgraph 限价单处理
+        B -->|LIMIT| C{TimeInForce}
+        C -->|GTC| D[processGtcOrder]
+        C -->|IOC| E[processIocOrder]
+        C -->|FOK| F[processFokOrder]
+        C -->|POST_ONLY| G[processPostOnlyOrder]
+    end
+
+    subgraph 市价单处理
+        B -->|MARKET| H[processMarketOrder]
+        H --> I{是否队首?}
+        I -->|是| J[立即撮合]
+        I -->|否| K[加入队列]
+    end
+
+    subgraph 核心撮合
+        D --> L[tryMatchInstantly]
+        E --> L
+        J --> L
+        L --> M[遍历对手盘]
+        M --> N{价格交叉?}
+        N -->|是| O[match]
+        O --> P[doMatch]
+        P --> Q[更新成交量]
+        N -->|否| R[停止撮合]
+    end
+
+    style A fill:#0d6efd,color:#fff
+    style L fill:#198754,color:#fff
+    style P fill:#dc3545,color:#fff
+        </pre>
+
+        <h4 class="mt-4">撮合优先级规则</h4>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">价格优先</div>
+                    <div class="card-body">
+                        <ul class="mb-0">
+                            <li><strong>买单:</strong> 价格从高到低 (TreeMap 降序)</li>
+                            <li><strong>卖单:</strong> 价格从低到高 (TreeMap 升序)</li>
+                        </ul>
+                        <pre class="code-block mt-2">// 买盘: 降序排列
+buyOrders = new TreeMap<>(Comparator.reverseOrder());
+// 卖盘: 默认升序
+sellOrders = new TreeMap<>();</pre>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-info text-white">时间优先</div>
+                    <div class="card-body">
+                        <ul class="mb-0">
+                            <li>同价格档位内，先到先得 (FIFO)</li>
+                            <li>使用 LinkedList 保证插入顺序</li>
+                        </ul>
+                        <pre class="code-block mt-2">// DepthLine 使用 LinkedList
+private List&lt;MatchOrder&gt; orders = new LinkedList&lt;&gt;();</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">价格交叉判断</h4>
+        <pre class="code-block">
+// OrderBook.isCross() 核心逻辑
+public boolean isCross(MatchOrder newOrder) {
+    if (newOrder.isBuy()) {
+        BigDecimal bestAsk = getBestAskPrice();
+        // 买单价格 >= 卖盘最低价 = 交叉
+        return bestAsk != null && newOrder.getDelegatePrice().compareTo(bestAsk) >= 0;
+    } else {
+        BigDecimal bestBid = getBestBidPrice();
+        // 卖单价格 <= 买盘最高价 = 交叉
+        return bestBid != null && newOrder.getDelegatePrice().compareTo(bestBid) <= 0;
+    }
+}</pre>
+    </section>
+
+    <!-- ==================== 功能分析 - STP ==================== -->
+    <section id="func-stp" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">功能分析 - 自成交保护 (STP)</h2>
+
+        <pre class="mermaid">
+flowchart TD
+    A[processSTP] --> B{stpAccountId >= 0?}
+    B -->|否| C[OP_NORMAL<br/>不保护]
+    B -->|是| D{策略 != DEFAULT?}
+    D -->|否| C
+    D -->|是| E{taker.stpAccountId == maker.stpAccountId?}
+    E -->|否| C
+    E -->|是| F{策略类型}
+
+    F -->|CANCEL_TAKER| G{是FOK?}
+    G -->|是| H[OP_BREAK<br/>不撤单]
+    G -->|否| I[撤销taker<br/>OP_BREAK]
+
+    F -->|CANCEL_MAKER| J{是FOK?}
+    J -->|是| K[OP_CONTINUE<br/>标记待撤]
+    J -->|否| L[撤销maker<br/>OP_CONTINUE]
+
+    F -->|CANCEL_BOTH| M{是FOK?}
+    M -->|是| N[OP_BREAK<br/>不撤单]
+    M -->|否| O[撤销双方<br/>OP_BREAK]
+
+    style A fill:#0d6efd,color:#fff
+    style C fill:#198754,color:#fff
+    style H fill:#ffc107,color:#000
+    style K fill:#ffc107,color:#000
+    style N fill:#ffc107,color:#000
+        </pre>
+
+        <h4 class="mt-4">STP 策略详解</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>策略</th><th>触发条件</th><th>处理方式</th><th>适用场景</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>DEFAULT</code></td>
+                    <td>-</td>
+                    <td>不进行任何保护</td>
+                    <td>允许自成交的场景</td>
+                </tr>
+                <tr>
+                    <td><code>CANCEL_TAKER</code></td>
+                    <td>同账户订单交叉</td>
+                    <td>撤销主动方 (新订单)</td>
+                    <td>保护已挂单，优先做市</td>
+                </tr>
+                <tr>
+                    <td><code>CANCEL_MAKER</code></td>
+                    <td>同账户订单交叉</td>
+                    <td>撤销被动方 (挂单)</td>
+                    <td>保护新订单成交</td>
+                </tr>
+                <tr>
+                    <td><code>CANCEL_BOTH</code></td>
+                    <td>同账户订单交叉</td>
+                    <td>双方都撤销</td>
+                    <td>严格防止自成交</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-warning mt-3">
+            <strong>FOK 特殊处理:</strong>
+            FOK 订单在 STP 触发时不会立即撤销，而是返回控制信号 (OP_BREAK/OP_CONTINUE)，
+            由 FokOrderProcessor 在 Phase 1 预撮合阶段统一处理，确保 FOK 语义的原子性。
+        </div>
+    </section>
+
+    <!-- ==================== 功能分析 - 生命周期 ==================== -->
+    <section id="func-lifecycle" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">功能分析 - 订单生命周期</h2>
+
+        <pre class="mermaid">
+stateDiagram-v2
+    [*] --> NEW : 下单成功
+
+    NEW --> PARTIALLY_FILLED : 部分成交
+    NEW --> FULL_FILLED : 完全成交
+    NEW --> CANCELLED : 撤单/STP/IOC无交叉
+    NEW --> REJECTED : 重复订单/币对未配置
+
+    PARTIALLY_FILLED --> FULL_FILLED : 剩余全部成交
+    PARTIALLY_FILLED --> CANCELLED : IOC撤销剩余/用户撤单
+
+    FULL_FILLED --> [*] : 终态
+    CANCELLED --> [*] : 终态
+    REJECTED --> [*] : 终态
+
+    note right of NEW : 初始状态
+    note right of PARTIALLY_FILLED : 可继续撮合
+    note right of FULL_FILLED : 订单完成
+        </pre>
+
+        <h4 class="mt-4">撤单原因枚举</h4>
+        <table class="table table-sm table-bordered">
+            <thead class="table-dark">
+                <tr><th>枚举值</th><th>说明</th><th>触发场景</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><code>NONE</code></td><td>无</td><td>正常状态</td></tr>
+                <tr><td><code>POST_ONLY_CROSS</code></td><td>POST_ONLY 价格交叉</td><td>POST_ONLY 订单会立即成交时</td></tr>
+                <tr><td><code>IOC_NOT_CROSS</code></td><td>IOC 不交叉</td><td>IOC 订单无可成交对手盘</td></tr>
+                <tr><td><code>FOK_NOT_CROSS</code></td><td>FOK 不交叉</td><td>FOK 订单无可成交对手盘</td></tr>
+                <tr><td><code>FOK_NOT_FULLFILL_CANCEL</code></td><td>FOK 无法完全成交</td><td>对手盘深度不足</td></tr>
+                <tr><td><code>IOC_NOT_FULLFILL_CANCEL_REMAINING</code></td><td>IOC 剩余撤销</td><td>IOC 部分成交后</td></tr>
+                <tr><td><code>STP_CANCEL</code></td><td>自成交保护撤销</td><td>触发 STP 策略</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 架构设计 - 整体架构 ==================== -->
+    <section id="arch-overview" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">架构设计 - 整体架构</h2>
+
+        <pre class="mermaid">
+flowchart TB
+    subgraph 外部接口
+        A[gRPC API] --> B[MatchEngine]
+        C[Aeron Cluster] --> B
+    end
+
+    subgraph 撮合引擎层
+        B --> D[MatchEngineState]
+        D --> E[MatchContext]
+        E --> F[OrderBook]
+    end
+
+    subgraph 服务层
+        B --> G[FokOrderProcessor]
+        B --> H[StpStrategyService]
+        G --> I[MatchCoreService]
+        H --> I
+    end
+
+    subgraph 数据模型层
+        F --> J[DepthLine]
+        J --> K[MatchOrder]
+        F --> L[MatchConfig]
+    end
+
+    subgraph 基础设施
+        M[(Agrona Collections)]
+        N[(BigDecimal 精度)]
+        O[(Logback 日志)]
+    end
+
+    style B fill:#0d6efd,color:#fff
+    style I fill:#198754,color:#fff
+        </pre>
+
+        <h4 class="mt-4">分层职责</h4>
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">外部接口层</div>
+                    <div class="card-body">
+                        <ul class="small mb-0">
+                            <li>gRPC 服务定义</li>
+                            <li>Aeron Cluster 集成</li>
+                            <li>协议编解码 (SBE)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">撮合引擎层</div>
+                    <div class="card-body">
+                        <ul class="small mb-0">
+                            <li>订单路由分发</li>
+                            <li>状态管理</li>
+                            <li>订单簿维护</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">服务层</div>
+                    <div class="card-body">
+                        <ul class="small mb-0">
+                            <li>FOK 两阶段撮合</li>
+                            <li>STP 策略执行</li>
+                            <li>核心成交逻辑</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100">
+                    <div class="card-header bg-secondary text-white">数据模型层</div>
+                    <div class="card-body">
+                        <ul class="small mb-0">
+                            <li>订单实体</li>
+                            <li>深度档位</li>
+                            <li>配置模型</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 架构设计 - 模块划分 ==================== -->
+    <section id="arch-modules" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">架构设计 - 模块划分</h2>
+
+        <pre class="mermaid">
+classDiagram
+    class MatchEngine {
+        -MatchEngineState state
+        -FokOrderProcessor fokProcessor
+        -StpStrategyService stpService
+        +placeOrder(MatchOrder)
+        +processLimitOrder()
+        +processMarketOrder()
+        -tryMatchInstantly()
+        -match()
+    }
+
+    class MatchEngineState {
+        -Map~String,MatchConfig~ configMap
+        -MatchContext context
+        +getMatchConfig(symbol)
+        +addMatchConfig(config)
+    }
+
+    class MatchContext {
+        -Map~String,OrderBook~ orderBooks
+        +getOrderBook(symbol)
+        +getOrCreateOrderBook(symbol)
+    }
+
+    class OrderBook {
+        -TreeMap~BigDecimal,DepthLine~ buyOrders
+        -TreeMap~BigDecimal,DepthLine~ sellOrders
+        -Map~Long,MatchOrder~ orderMap
+        +addOrder(order)
+        +removeOrder(order)
+        +isCross(order)
+    }
+
+    class DepthLine {
+        -BigDecimal price
+        -List~MatchOrder~ orders
+        +openOrder(order)
+        +cancelOrder(order)
+        +isEmpty()
+    }
+
+    class MatchOrder {
+        -long orderId
+        -BigDecimal delegatePrice
+        -BigDecimal delegateCount
+        -BigDecimal dealtCount
+        +deepCopy()
+        +updateFilledQuantity()
+        +fullFilled()
+    }
+
+    MatchEngine --> MatchEngineState
+    MatchEngineState --> MatchContext
+    MatchContext --> OrderBook
+    OrderBook --> DepthLine
+    DepthLine --> MatchOrder
+        </pre>
+
+        <h4 class="mt-4">模块依赖关系</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>模块</th><th>职责</th><th>依赖</th><th>被依赖</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>MatchEngine</code></td>
+                    <td>撮合引擎入口，协调各组件</td>
+                    <td>State, FokProcessor, StpService</td>
+                    <td>外部 API</td>
+                </tr>
+                <tr>
+                    <td><code>FokOrderProcessor</code></td>
+                    <td>FOK 订单专用处理器</td>
+                    <td>StpService, MatchCoreService</td>
+                    <td>MatchEngine</td>
+                </tr>
+                <tr>
+                    <td><code>StpStrategyService</code></td>
+                    <td>自成交保护策略执行</td>
+                    <td>MatchOrder (读取状态)</td>
+                    <td>MatchEngine, FokProcessor</td>
+                </tr>
+                <tr>
+                    <td><code>MatchCoreService</code></td>
+                    <td>核心成交逻辑 (单例)</td>
+                    <td>MatchOrder, OrderBook</td>
+                    <td>MatchEngine, FokProcessor</td>
+                </tr>
+                <tr>
+                    <td><code>OrderBook</code></td>
+                    <td>订单簿管理</td>
+                    <td>DepthLine, MatchOrder</td>
+                    <td>MatchContext</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 架构设计 - 设计模式 ==================== -->
+    <section id="arch-patterns" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">架构设计 - 设计模式</h2>
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">单例模式 (Enum Singleton)</div>
+                    <div class="card-body">
+                        <p class="text-muted small">MatchCoreService 使用枚举实现线程安全单例</p>
+                        <pre class="code-block">public enum MatchCoreService {
+    INSTANCE;
+
+    public void doMatch(...) {
+        // 核心撮合逻辑
+    }
+}</pre>
+                        <span class="badge bg-success">优点:</span> 线程安全、防反射攻击、简洁
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">策略模式 (Strategy Pattern)</div>
+                    <div class="card-body">
+                        <p class="text-muted small">STP 策略通过枚举实现多种处理方式</p>
+                        <pre class="code-block">switch (taker.getStpStrategyEnum()) {
+    case CANCEL_TAKER: ...
+    case CANCEL_MAKER: ...
+    case CANCEL_BOTH: ...
+}</pre>
+                        <span class="badge bg-success">优点:</span> 策略独立、易扩展
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">建造者模式 (Builder Pattern)</div>
+                    <div class="card-body">
+                        <p class="text-muted small">MatchOrder 使用 Lombok @Builder</p>
+                        <pre class="code-block">MatchOrder order = MatchOrder.builder()
+    .orderId(1001L)
+    .delegatePrice(new BigDecimal("100"))
+    .delegateCount(new BigDecimal("10"))
+    .build();</pre>
+                        <span class="badge bg-success">优点:</span> 参数清晰、构建灵活
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-warning text-dark">迭代器模式 (Iterator Pattern)</div>
+                    <div class="card-body">
+                        <p class="text-muted small">安全遍历并删除订单簿元素</p>
+                        <pre class="code-block">Iterator&lt;MatchOrder&gt; it = depthLine.iterator();
+while (it.hasNext()) {
+    MatchOrder order = it.next();
+    if (order.isMatchOver()) {
+        it.remove(); // 安全删除
+    }
+}</pre>
+                        <span class="badge bg-success">优点:</span> 避免 ConcurrentModificationException
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">两阶段提交模式 (FOK)</h4>
+        <div class="architecture-box">
+            <pre class="mermaid">
+sequenceDiagram
+    participant Client
+    participant FokProcessor
+    participant OrderBook
+    participant CopyOrder
+
+    Client->>FokProcessor: process(fokOrder)
+
+    rect rgb(255, 243, 205)
+        Note over FokProcessor,CopyOrder: Phase 1: 预撮合 (Dry Run)
+        FokProcessor->>CopyOrder: deepCopy()
+        FokProcessor->>OrderBook: 模拟撮合 (只读)
+        OrderBook-->>FokProcessor: 是否可完全成交?
+    end
+
+    alt 可完全成交
+        rect rgb(209, 231, 221)
+            Note over FokProcessor,OrderBook: Phase 2: 真实撮合
+            FokProcessor->>OrderBook: 撤销 STP 标记订单
+            FokProcessor->>OrderBook: 执行真实撮合
+            OrderBook-->>FokProcessor: FULL_FILLED
+        end
+    else 无法完全成交
+        FokProcessor->>Client: CANCELLED (FOK_NOT_FULLFILL)
+    end
+            </pre>
+        </div>
+    </section>
+
+    <!-- ==================== 架构设计 - 数据结构 ==================== -->
+    <section id="arch-data" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">架构设计 - 数据结构选择</h2>
+
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>数据结构</th><th>使用场景</th><th>时间复杂度</th><th>选择原因</th></tr>
+            </thead>
+            <tbody>
+                <tr class="table-success">
+                    <td><code>TreeMap&lt;BigDecimal, DepthLine&gt;</code></td>
+                    <td>买/卖订单簿</td>
+                    <td>查找 O(log n)</td>
+                    <td>自动排序、支持自定义比较器</td>
+                </tr>
+                <tr class="table-success">
+                    <td><code>LinkedList&lt;MatchOrder&gt;</code></td>
+                    <td>同价格档位订单队列</td>
+                    <td>插入 O(1)、遍历 O(n)</td>
+                    <td>保持 FIFO 时间优先、支持迭代器删除</td>
+                </tr>
+                <tr class="table-success">
+                    <td><code>Long2ObjectHashMap</code></td>
+                    <td>订单 ID 到订单的映射</td>
+                    <td>查找 O(1)</td>
+                    <td>Agrona 高性能集合，避免 Long 装箱</td>
+                </tr>
+                <tr class="table-success">
+                    <td><code>BigDecimal</code></td>
+                    <td>价格、数量</td>
+                    <td>-</td>
+                    <td>精确计算，避免浮点数精度问题</td>
+                </tr>
+                <tr class="table-warning">
+                    <td><code>HashMap&lt;String, OrderBook&gt;</code></td>
+                    <td>交易对到订单簿映射</td>
+                    <td>查找 O(1)</td>
+                    <td>可考虑换成 Object2ObjectHashMap</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h4 class="mt-4">订单簿内存布局</h4>
+        <pre class="mermaid">
+flowchart LR
+    subgraph OrderBook
+        direction TB
+        subgraph buyOrders [买盘 TreeMap 降序]
+            B1[100.5] --> BL1[Order1 → Order2]
+            B2[100.0] --> BL2[Order3]
+            B3[99.5] --> BL3[Order4 → Order5 → Order6]
+        end
+        subgraph sellOrders [卖盘 TreeMap 升序]
+            S1[101.0] --> SL1[Order7 → Order8]
+            S2[101.5] --> SL2[Order9]
+            S3[102.0] --> SL3[Order10]
+        end
+        subgraph orderMap [订单映射 Long2ObjectHashMap]
+            M1[1001 → Order1]
+            M2[1002 → Order2]
+            M3[... → ...]
+        end
+    end
+        </pre>
+    </section>
+
+    <!-- ==================== 架构设计 - 性能优化 ==================== -->
+    <section id="arch-perf" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">架构设计 - 性能优化</h2>
+
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">Agrona 集合</div>
+                    <div class="fs-4 fw-bold text-success">零装箱</div>
+                    <div class="small">Long2ObjectHashMap 避免 Long 包装</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card primary p-3">
+                    <div class="text-muted small">TreeMap 查找</div>
+                    <div class="fs-4 fw-bold text-primary">O(log n)</div>
+                    <div class="small">红黑树实现高效价格定位</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card info p-3">
+                    <div class="text-muted small">延迟删除</div>
+                    <div class="fs-4 fw-bold text-info">pendingRemoves</div>
+                    <div class="small">遍历后统一删除避免并发异常</div>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">性能优化措施</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>优化项</th><th>实现方式</th><th>效果</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>避免 Long 装箱</td>
+                    <td>使用 Agrona Long2ObjectHashMap</td>
+                    <td>减少 GC 压力，提升查找性能</td>
+                </tr>
+                <tr>
+                    <td>有序集合</td>
+                    <td>TreeMap 存储价格档位</td>
+                    <td>O(log n) 快速定位最优价格</td>
+                </tr>
+                <tr>
+                    <td>延迟删除</td>
+                    <td>pendingRemoves 列表收集后统一删除</td>
+                    <td>避免 ConcurrentModificationException</td>
+                </tr>
+                <tr>
+                    <td>单线程模型</td>
+                    <td>Aeron Cluster 保证顺序处理</td>
+                    <td>无锁设计，消除同步开销</td>
+                </tr>
+                <tr>
+                    <td>对象复用</td>
+                    <td>FOK deepCopy 仅在预撮合时使用</td>
+                    <td>真实撮合直接操作原对象</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-warning mt-3">
+            <strong>待优化项:</strong>
+            <ul class="mb-0">
+                <li>日志打印 <code>JSON.toJSONString(orderBook, true)</code> 会影响性能，建议改为 debug 级别</li>
+                <li>BigDecimal 频繁创建，可考虑对象池或缓存常用值</li>
+                <li>缺少性能基准测试 (JMH Benchmark)</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- ==================== 代码质量 - 测试覆盖 ==================== -->
+    <section id="quality-test" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">代码质量 - 测试覆盖</h2>
+
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">测试用例总数</div>
+                    <div class="fs-2 fw-bold text-success">131+</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">核心模块覆盖</div>
+                    <div class="fs-2 fw-bold text-success">98%</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card success p-3">
+                    <div class="text-muted small">分支覆盖</div>
+                    <div class="fs-2 fw-bold text-success">100%</div>
+                    <div class="small">FOK/STP 完全覆盖</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card info p-3">
+                    <div class="text-muted small">JaCoCo 阈值</div>
+                    <div class="fs-2 fw-bold text-info">90%</div>
+                    <div class="small">CI 构建要求</div>
+                </div>
+            </div>
+        </div>
+
+        <pre class="mermaid">
+pie title 测试用例分布
+    "MatchEngineTest" : 53
+    "OrderBookTest" : 37
+    "FokOrderProcessorTest" : 24
+    "StpStrategyServiceTest" : 17
+        </pre>
+
+        <h4 class="mt-4">测试质量评估</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>测试类</th><th>用例数</th><th>覆盖场景</th><th>评价</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>MatchEngineTest</td>
+                    <td>53</td>
+                    <td>GTC/IOC/POST_ONLY/市价单、跨档位、时间优先</td>
+                    <td><span class="badge bg-success">优秀</span></td>
+                </tr>
+                <tr>
+                    <td>OrderBookTest</td>
+                    <td>37</td>
+                    <td>初始化、添加/删除、价格交叉、边界</td>
+                    <td><span class="badge bg-success">优秀</span></td>
+                </tr>
+                <tr>
+                    <td>FokOrderProcessorTest</td>
+                    <td>24</td>
+                    <td>两阶段、STP 交互、边界、连续 FOK</td>
+                    <td><span class="badge bg-success">优秀</span></td>
+                </tr>
+                <tr>
+                    <td>StpStrategyServiceTest</td>
+                    <td>17</td>
+                    <td>四种策略、FOK 特殊处理、边界账户</td>
+                    <td><span class="badge bg-success">优秀</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 代码质量 - 代码规范 ==================== -->
+    <section id="quality-code" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">代码质量 - 代码规范</h2>
+
+        <div class="pros-cons">
+            <div class="card border-success">
+                <div class="card-header bg-success text-white">规范良好</div>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">使用 Lombok 减少样板代码</li>
+                    <li class="list-group-item">枚举类设计规范，含 code/desc 字段</li>
+                    <li class="list-group-item">方法命名清晰 (processGtcOrder, isFokFullFill)</li>
+                    <li class="list-group-item">常量使用 final static 定义</li>
+                    <li class="list-group-item">日志格式统一，含关键参数</li>
+                </ul>
+            </div>
+            <div class="card border-warning">
+                <div class="card-header bg-warning">待改进</div>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">MatchEngine 类过大 (~400行)，建议拆分</li>
+                    <li class="list-group-item">部分魔法数字未抽取 (如 stpAccountId &lt; 0)</li>
+                    <li class="list-group-item">BigDecimalUtil 方法过多，可考虑分类</li>
+                    <li class="list-group-item">部分 TODO 注释未完成</li>
+                </ul>
+            </div>
+        </div>
+
+        <h4 class="mt-4">代码复杂度分析</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>类/方法</th><th>行数</th><th>圈复杂度</th><th>建议</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>MatchEngine.java</td>
+                    <td>~400</td>
+                    <td>中等</td>
+                    <td><span class="badge bg-warning text-dark">可拆分</span> 按订单类型提取处理器</td>
+                </tr>
+                <tr>
+                    <td>MatchEngine.tryMatchInstantly()</td>
+                    <td>~80</td>
+                    <td>较高</td>
+                    <td><span class="badge bg-info">可接受</span> 核心撮合逻辑</td>
+                </tr>
+                <tr>
+                    <td>FokOrderProcessor.process()</td>
+                    <td>~70</td>
+                    <td>中等</td>
+                    <td><span class="badge bg-success">良好</span> 逻辑清晰</td>
+                </tr>
+                <tr>
+                    <td>BigDecimalUtil.java</td>
+                    <td>~800</td>
+                    <td>低</td>
+                    <td><span class="badge bg-info">工具类</span> 方法多但简单</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 代码质量 - 异常处理 ==================== -->
+    <section id="quality-error" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">代码质量 - 异常处理</h2>
+
+        <h4>异常处理策略</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>场景</th><th>处理方式</th><th>评价</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>币对未配置</td>
+                    <td><code>order.reject()</code> + 日志警告</td>
+                    <td><span class="badge bg-success">合理</span></td>
+                </tr>
+                <tr>
+                    <td>重复订单</td>
+                    <td><code>order.reject()</code> + 日志警告</td>
+                    <td><span class="badge bg-success">合理</span></td>
+                </tr>
+                <tr>
+                    <td>空深度档位</td>
+                    <td>跳过并移除 + 日志警告</td>
+                    <td><span class="badge bg-success">合理</span></td>
+                </tr>
+                <tr>
+                    <td>对手单为 null</td>
+                    <td>终止撮合循环 (兜底)</td>
+                    <td><span class="badge bg-success">防御性编程</span></td>
+                </tr>
+                <tr>
+                    <td>对手单为市价单</td>
+                    <td>终止撮合循环 (不应出现)</td>
+                    <td><span class="badge bg-success">防御性编程</span></td>
+                </tr>
+                <tr>
+                    <td>FOK 未完全成交</td>
+                    <td><code>log.error()</code> 记录异常状态</td>
+                    <td><span class="badge bg-warning text-dark">可增强</span> 建议抛异常</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-info mt-3">
+            <strong>防御性编程体现:</strong>
+            <pre class="code-block mb-0">// 兜底检查：对手单必须存在
+if (oppoOrder == null) {
+    endMatch = true;
+    return endMatch;
+}
+
+// 兜底检查：对手单必须是限价单
+if (oppoOrder.isMarket()) {
+    endMatch = true;
+    return endMatch;
+}</pre>
+        </div>
+    </section>
+
+    <!-- ==================== 代码质量 - 日志设计 ==================== -->
+    <section id="quality-log" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">代码质量 - 日志设计</h2>
+
+        <h4>日志级别使用</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>级别</th><th>使用场景</th><th>示例</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>INFO</code></td>
+                    <td>关键业务流程</td>
+                    <td>订单下单、撮合完成、FOK 处理开始</td>
+                </tr>
+                <tr>
+                    <td><code>WARN</code></td>
+                    <td>异常但可恢复</td>
+                    <td>空深度档位、币对未配置</td>
+                </tr>
+                <tr>
+                    <td><code>ERROR</code></td>
+                    <td>严重错误</td>
+                    <td>FOK 应完全成交但未成交</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert alert-warning mt-3">
+            <strong>日志性能问题:</strong>
+            <pre class="code-block mb-0">// 问题代码：每次撮合完成都打印完整 JSON
+log.info("tryMatchInstantly 撮合完成. newOrder:{}, orderBook:{}",
+    JSON.toJSONString(newOrder),
+    JSON.toJSONString(orderBook, true));  // ← 性能开销大
+
+// 建议改进：
+if (log.isDebugEnabled()) {
+    log.debug("撮合完成. orderId:{}, status:{}",
+        newOrder.getOrderId(), newOrder.getOrderStatus());
+}</pre>
+        </div>
+
+        <h4 class="mt-4">日志配置 (logback.xml)</h4>
+        <ul>
+            <li><strong>控制台输出:</strong> 开发调试</li>
+            <li><strong>滚动文件:</strong> 按日期+大小滚动，保留 30 天</li>
+            <li><strong>异步写入:</strong> AsyncAppender 队列 512，减少 IO 阻塞</li>
+        </ul>
+    </section>
+
+    <!-- ==================== 深度分析 - 核心类 ==================== -->
+    <section id="deep-core" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">深度分析 - 核心类分析</h2>
+
+        <h4>MatchEngine 职责分析</h4>
+        <pre class="mermaid">
+mindmap
+    root((MatchEngine))
+        入口方法
+            placeOrder
+            checkMatchConfig
+            checkDuplicate
+        限价单处理
+            processLimitOrder
+            processGtcOrder
+            processIocOrder
+            processFokOrder
+            processPostOnlyOrder
+        市价单处理
+            processMarketOrder
+            marketOrderMatchInstantly
+            handleMarketOrderAfterMatching
+        撮合核心
+            tryMatchInstantly
+            match
+            clearEmptyDepthLine
+        </pre>
+
+        <div class="alert alert-warning">
+            <strong>职责过重:</strong> MatchEngine 承担了太多职责，建议拆分为:
+            <ul class="mb-0">
+                <li><code>OrderRouter</code> - 订单路由分发</li>
+                <li><code>LimitOrderProcessor</code> - 限价单处理 (含 GTC/IOC/POST_ONLY)</li>
+                <li><code>MarketOrderProcessor</code> - 市价单处理</li>
+                <li><code>MatchExecutor</code> - 核心撮合执行</li>
+            </ul>
+        </div>
+
+        <h4 class="mt-4">FokOrderProcessor 设计亮点</h4>
+        <div class="architecture-box">
+            <h5>两阶段提交的优势</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <strong>Phase 1 (预撮合):</strong>
+                    <ul>
+                        <li>使用 <code>deepCopy()</code> 复制订单</li>
+                        <li>模拟成交过程，不修改原订单簿</li>
+                        <li>收集需要 STP 撤销的订单到 <code>fokPendingRemoves</code></li>
+                        <li>判断是否可完全成交</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <strong>Phase 2 (真实撮合):</strong>
+                    <ul>
+                        <li>先执行 STP 撤销</li>
+                        <li>再执行真实撮合</li>
+                        <li>保证 FOK 原子性语义</li>
+                    </ul>
+                </div>
+            </div>
+            <pre class="code-block mt-3">// Phase 1: 预撮合
+MatchOrder copyOrder = newOrder.deepCopy();
+boolean exit = this.fokPhase1(copyOrder, depthLine, orderBook,
+    fokPendingRemoves, fokCancelReasonMap);
+
+// 判断是否可完全成交
+if (copyOrder.getOrderStatus() != OrderStatusEnum.FULL_FILLED) {
+    newOrder.cancel(CancelReasonEnum.FOK_NOT_FULLFILL_CANCEL);
+    return;
+}
+
+// Phase 2: 真实撮合
+for (MatchOrder needCancelOrder : fokPendingRemoves) {
+    needCancelOrder.cancel(fokCancelReasonMap.get(needCancelOrder.getOrderId()));
+    orderBook.removeOrder(needCancelOrder);
+}
+fokTryMatchInstantly(newOrder, orderBook);</pre>
+        </div>
+    </section>
+
+    <!-- ==================== 深度分析 - 风险点 ==================== -->
+    <section id="deep-risk" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">深度分析 - 风险点识别</h2>
+
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>风险等级</th><th>风险点</th><th>影响</th><th>建议措施</th></tr>
+            </thead>
+            <tbody>
+                <tr class="table-danger">
+                    <td><span class="badge bg-danger">高</span></td>
+                    <td>市价单挂单逻辑 TODO</td>
+                    <td>市价单无法完全成交时行为未定义</td>
+                    <td>完成 <code>publishMarketHangingCmd</code> 实现</td>
+                </tr>
+                <tr class="table-warning">
+                    <td><span class="badge bg-warning text-dark">中</span></td>
+                    <td>日志打印完整 JSON</td>
+                    <td>高频交易时影响性能</td>
+                    <td>改为 debug 级别，或仅打印关键字段</td>
+                </tr>
+                <tr class="table-warning">
+                    <td><span class="badge bg-warning text-dark">中</span></td>
+                    <td>BigDecimal 频繁创建</td>
+                    <td>增加 GC 压力</td>
+                    <td>对常用值 (0, 1) 使用静态常量</td>
+                </tr>
+                <tr class="table-info">
+                    <td><span class="badge bg-info">低</span></td>
+                    <td>amendOrder 未完整实现</td>
+                    <td>订单修改功能缺失</td>
+                    <td>补充修改订单逻辑</td>
+                </tr>
+                <tr class="table-info">
+                    <td><span class="badge bg-info">低</span></td>
+                    <td>缺少性能基准测试</td>
+                    <td>无法量化性能指标</td>
+                    <td>添加 JMH 基准测试</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h4 class="mt-4">潜在并发问题</h4>
+        <div class="alert alert-success">
+            <strong>设计上已规避:</strong>
+            <ul class="mb-0">
+                <li>采用 Aeron Cluster 单线程处理模型</li>
+                <li>使用迭代器安全删除 + pendingRemoves 延迟删除</li>
+                <li>无共享可变状态跨线程访问</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- ==================== 深度分析 - 改进建议 ==================== -->
+    <section id="deep-improve" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">深度分析 - 改进建议</h2>
+
+        <h4>短期改进 (1-2周)</h4>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-danger text-white">P0 - 紧急</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <strong>完成市价单挂单逻辑</strong><br>
+                            <small class="text-muted">实现 publishMarketHangingCmd 定时任务</small>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-warning">P1 - 重要</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <strong>优化日志输出</strong><br>
+                            <small class="text-muted">改为 debug 级别，精简输出内容</small>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>提取魔法数字</strong><br>
+                            <small class="text-muted">stpAccountId 判断条件等</small>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">中期改进 (1-2月)</h4>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">架构优化</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">拆分 MatchEngine 为多个处理器</li>
+                        <li class="list-group-item">引入 OrderProcessor 接口</li>
+                        <li class="list-group-item">IOC 处理器独立</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">功能增强</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">完善 amendOrder 实现</li>
+                        <li class="list-group-item">添加批量撤单功能</li>
+                        <li class="list-group-item">支持冰山订单</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white">质量提升</div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">添加 JMH 基准测试</li>
+                        <li class="list-group-item">增加集成测试</li>
+                        <li class="list-group-item">完善 JavaDoc 文档</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mt-4">长期改进 (3-6月)</h4>
+        <ul>
+            <li><strong>支持更多订单类型:</strong> 止损单、止盈单、跟踪止损</li>
+            <li><strong>多交易所接入:</strong> 抽象交易所适配器</li>
+            <li><strong>监控告警:</strong> 集成 Prometheus + Grafana</li>
+            <li><strong>压力测试:</strong> 模拟高并发场景验证稳定性</li>
+        </ul>
+    </section>
+
+    <!-- ==================== 附录 - 依赖分析 ==================== -->
+    <section id="appendix-deps" class="mb-5 section-divider">
+        <h2 class="border-bottom pb-2 mb-4">附录 - 依赖分析</h2>
+
+        <pre class="mermaid">
+mindmap
+    root((依赖))
+        核心框架
+            Aeron 1.44.1
+            Agrona 1.21.1
+            gRPC 1.60.0
+        序列化
+            FastJSON 2.0.60
+            Jackson 2.16.0
+            Protobuf 3.25.1
+            SBE
+        工具库
+            Lombok 1.18.42
+            Commons Lang 3.20.0
+        日志
+            SLF4J 2.0.9
+            Logback 1.4.14
+        测试
+            JUnit 5
+            JaCoCo
+        </pre>
+
+        <h4 class="mt-4">关键依赖说明</h4>
+        <table class="table table-bordered">
+            <thead class="table-dark">
+                <tr><th>依赖</th><th>版本</th><th>用途</th><th>评价</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Aeron</td>
+                    <td>1.44.1</td>
+                    <td>高性能消息传输 + 集群共识</td>
+                    <td><span class="badge bg-success">业界领先</span></td>
+                </tr>
+                <tr>
+                    <td>Agrona</td>
+                    <td>1.21.1</td>
+                    <td>高性能数据结构</td>
+                    <td><span class="badge bg-success">零 GC 设计</span></td>
+                </tr>
+                <tr>
+                    <td>FastJSON</td>
+                    <td>2.0.60</td>
+                    <td>JSON 序列化</td>
+                    <td><span class="badge bg-warning text-dark">有安全历史</span></td>
+                </tr>
+                <tr>
+                    <td>Disruptor</td>
+                    <td>3.4.4</td>
+                    <td>高性能队列 (未使用)</td>
+                    <td><span class="badge bg-secondary">可移除</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ==================== 附录 - 文件清单 ==================== -->
+    <section id="appendix-files" class="mb-5">
+        <h2 class="border-bottom pb-2 mb-4">附录 - 文件清单</h2>
+
+        <pre class="code-block">
+laser-matching-engine/
+├── src/main/java/com/laser/exchange/matching/
+│   ├── Main.java                           # 应用入口
+│   ├── core/
+│   │   ├── engine/
+│   │   │   └── MatchEngine.java            # 撮合引擎 (~400行)
+│   │   ├── model/
+│   │   │   ├── DepthLine.java              # 深度档位 (~50行)
+│   │   │   ├── MatchConfig.java            # 交易对配置 (~30行)
+│   │   │   ├── MatchContext.java           # 撮合上下文 (~40行)
+│   │   │   ├── MatchEngineState.java       # 引擎状态 (~50行)
+│   │   │   ├── MatchOrder.java             # 订单模型 (~200行)
+│   │   │   └── OrderBook.java              # 订单簿 (~300行)
+│   │   └── service/
+│   │       ├── FokOrderProcessor.java      # FOK处理器 (~250行)
+│   │       ├── MatchCoreService.java       # 核心撮合 (~80行)
+│   │       └── StpStrategyService.java     # STP服务 (~100行)
+│   ├── enums/
+│   │   ├── CancelReasonEnum.java           # 撤单原因
+│   │   ├── OpEnum.java                     # 操作枚举
+│   │   ├── OrderSideEnum.java              # 买卖方向
+│   │   ├── OrderStatusEnum.java            # 订单状态
+│   │   ├── OrderType.java                  # 订单类型
+│   │   ├── StpStrategyEnum.java            # STP策略
+│   │   └── TimeInForceEnum.java            # 有效期类型
+│   └── utils/
+│       └── BigDecimalUtil.java             # 精度工具 (~800行)
+├── src/test/java/                          # 测试代码 (131+ 用例)
+├── src/main/resources/
+│   ├── logback.xml                         # 日志配置
+│   └── sbe/matching-cluster.sbe.xml        # SBE 协议定义
+└── pom.xml                                 # Maven 配置
+        </pre>
+    </section>
+
+    <!-- 结语 -->
+    <section class="mb-5">
+        <div class="alert alert-primary">
+            <h5 class="alert-heading">审查结论</h5>
+            <p>
+                <strong>Laser Matching Engine</strong> 是一个设计良好、实现规范的交易撮合引擎。
+                核心功能完整，测试覆盖充分，架构清晰可扩展。
+            </p>
+            <hr>
+            <p class="mb-0">
+                <strong>综合评分: A (85/100)</strong> - 可作为生产级撮合系统的基础，建议优先完成市价单挂单逻辑和日志优化。
+            </p>
+        </div>
+    </section>
+
+</div>
+
+<!-- 回到顶部按钮 -->
+<button id="backToTop" class="btn btn-primary" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8679;</button>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+
+    window.addEventListener('scroll', function() {
+        document.getElementById('backToTop').style.display = window.scrollY > 300 ? 'flex' : 'none';
+    });
+
+    const sections = document.querySelectorAll('section[id]');
+    const navLinks = document.querySelectorAll('.sidebar .nav-link');
+    window.addEventListener('scroll', () => {
+        let current = '';
+        sections.forEach(s => { if (window.scrollY >= s.offsetTop - 100) current = s.id; });
+        navLinks.forEach(l => {
+            l.classList.remove('active');
+            if (l.getAttribute('href') === '#' + current) l.classList.add('active');
+        });
+    });
+</script>
+</body>
+</html>

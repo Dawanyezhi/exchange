@@ -1,0 +1,14 @@
+target/
+logs/
+
+.idea/
+*.iml
+
+.DS_Store
+
+*.log
+*.pid
+*.role
+
+hs_err_pid*
+replay_pid*

@@ -1,0 +1,1974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>开发问题记录 - Laser Matching Engine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
+            background: #212529; padding: 1.5rem 0; overflow-y: auto; z-index: 100;
+        }
+        .sidebar .nav-link {
+            color: #adb5bd; padding: 0.5rem 1.5rem; font-size: 0.9rem; border-left: 3px solid transparent;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: #fff; background: rgba(255,255,255,0.05); border-left-color: #0d6efd;
+        }
+        .sidebar .nav-header {
+            color: #6c757d; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;
+            padding: 1rem 1.5rem 0.3rem; font-weight: 600;
+        }
+        .sidebar .brand {
+            color: #fff; font-size: 1.05rem; font-weight: 700; padding: 0 1.5rem 1rem;
+            border-bottom: 1px solid #343a40; margin-bottom: 0.5rem;
+        }
+        .main-content { margin-left: 260px; padding: 2rem 3rem; max-width: 960px; }
+        .back-to-top {
+            position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+            width: 44px; height: 44px; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 1.2rem; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .back-to-top.show { display: flex; }
+        pre { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; overflow-x: auto; }
+        code { font-size: 0.88rem; }
+        table code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 0.82rem; }
+        .mermaid { text-align: center; margin: 1.5rem 0; }
+        h2 { padding-top: 1rem; }
+        .issue-card { border-left: 4px solid; margin-bottom: 2.5rem; }
+        .issue-card.resolved { border-left-color: #198754; }
+        .issue-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .timeline-badge {
+            font-size: 0.75rem; padding: 2px 8px; border-radius: 10px;
+            background: #e9ecef; color: #495057;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ==================== 左侧导航栏 ==================== -->
+<nav class="sidebar" id="sidebar">
+    <div class="brand"><i class="bi bi-bug me-2"></i>开发问题记录</div>
+
+    <div class="nav-header">概述</div>
+    <a class="nav-link active" href="#overview">文档说明</a>
+    <a class="nav-link" href="#env">环境信息</a>
+
+    <div class="nav-header">编译问题</div>
+    <a class="nav-link" href="#issue-001">ISS-001 --release 冲突</a>
+    <a class="nav-link" href="#issue-002">ISS-002 空 release 解析异常</a>
+
+    <div class="nav-header">运行时问题</div>
+    <a class="nav-link" href="#issue-003">ISS-003 Logback 版本冲突</a>
+    <a class="nav-link" href="#issue-006">ISS-006 @Value 类型转换失败</a>
+    <a class="nav-link" href="#issue-007">ISS-007 集群启动器多处隐患</a>
+    <a class="nav-link" href="#issue-008">ISS-008 启动脚本空数组兼容</a>
+    <a class="nav-link" href="#issue-009">ISS-009 onStart memberId 为 -1</a>
+    <a class="nav-link" href="#issue-010">ISS-010 ClusterEvent 误报 ERROR</a>
+    <a class="nav-link" href="#issue-011">ISS-011 Logback 多节点日志混写</a>
+    <a class="nav-link" href="#issue-012">ISS-012 amendOrder 单测编译失败</a>
+
+    <div class="nav-header">架构设计</div>
+    <a class="nav-link" href="#issue-013">ISS-013 SBE 命令分发机制</a>
+    <a class="nav-link" href="#issue-014">ISS-014 laser-common 抽取</a>
+
+    <div class="nav-header">依赖治理</div>
+    <a class="nav-link" href="#issue-004">ISS-004 依赖版本冲突清理</a>
+    <a class="nav-link" href="#issue-005">ISS-005 改为 BOM 管理</a>
+
+    <div class="nav-header">附录</div>
+    <a class="nav-link" href="#port-map">端口映射表</a>
+    <a class="nav-link" href="#cluster-role">集群角色管理</a>
+    <a class="nav-link" href="#dep-rules">依赖管理原则</a>
+    <a class="nav-link" href="#changelog">变更记录</a>
+</nav>
+
+<!-- ==================== 主内容区 ==================== -->
+<div class="main-content" id="top">
+
+    <h1 class="mb-2">开发问题记录</h1>
+    <p class="text-muted mb-4">Laser Matching Engine &nbsp;|&nbsp; 持续维护文档</p>
+    <hr>
+
+    <!-- ========== 概述 ========== -->
+    <h2 id="overview"><i class="bi bi-journal-text me-2"></i>文档说明</h2>
+    <p>
+        本文档记录 Laser Matching Engine 项目在开发过程中遇到的典型问题、根因分析及解决方案。
+        每个问题以 <code>ISS-XXX</code> 编号，便于后续检索和引用。
+    </p>
+
+    <div class="row text-center my-4">
+        <div class="col-md-4">
+            <div class="card card-body border-success">
+                <h3 class="text-success mb-0" id="total-count">14</h3>
+                <small class="text-muted">问题总数</small>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-body border-success">
+                <h3 class="text-success mb-0">14</h3>
+                <small class="text-muted">已解决</small>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-body border-warning">
+                <h3 class="text-warning mb-0">0</h3>
+                <small class="text-muted">待解决</small>
+            </div>
+        </div>
+    </div>
+
+    <h2 id="env"><i class="bi bi-pc-display me-2"></i>环境信息</h2>
+    <table class="table table-bordered mb-4">
+        <tbody>
+            <tr><th style="width:180px">项目</th><td>laser-matching-engine 1.0.0-SNAPSHOT</td></tr>
+            <tr><th>Spring Boot</th><td>3.4.5</td></tr>
+            <tr><th>JDK</th><td>17</td></tr>
+            <tr><th>Aeron</th><td>1.49.3 (aeron-all)</td></tr>
+            <tr><th>Agrona</th><td>2.3.0</td></tr>
+            <tr><th>Maven</th><td>3.9.9</td></tr>
+            <tr><th>maven-compiler-plugin</th><td>3.13.0</td></tr>
+            <tr><th>操作系统</th><td>macOS (Darwin 25.3.0)</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ========================================================== -->
+    <!-- ISS-001 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-001"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-001：--release 与 --add-exports 冲突</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-secondary">编译阶段</span>
+                <span class="timeline-badge">2026-03-11</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>[ERROR] 不允许在使用 --release 时从系统模块 java.base 导出程序包:
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile
+        (default-compile) on project laser-matching-engine: Compilation failure</code></pre>
+
+            <h5>根因分析</h5>
+            <p>
+                引入 <code>spring-boot-starter-parent 3.4.5</code> 后，父 POM 自动设置了：
+            </p>
+<pre><code>&lt;maven.compiler.release&gt;${java.version}&lt;/maven.compiler.release&gt;
+<!-- 等价于 javac --release 17 --></code></pre>
+            <p>
+                而项目的 <code>maven-compiler-plugin</code> 中配置了 <code>--add-exports java.base/sun.nio.ch=ALL-UNNAMED</code>
+                供 Aeron/Agrona 使用。<code>--release</code> 模式会锁定编译 API 到指定 JDK 版本的公开范围，
+                <strong>不允许</strong>通过 <code>--add-exports</code> 访问系统模块的内部包。
+            </p>
+
+            <div class="mermaid">
+flowchart LR
+    A["spring-boot-starter-parent"] -->|设置| B["maven.compiler.release = 17"]
+    B -->|等价于| C["javac --release 17"]
+    C -->|冲突| D["--add-exports java.base/sun.nio.ch"]
+    D -->|结果| E["编译失败"]
+
+    style E fill:#dc3545,color:#fff,stroke:none
+            </div>
+
+            <h5>解决方案</h5>
+            <p>在 <code>maven-compiler-plugin</code> 的 <code>&lt;configuration&gt;</code> 中通过 <code>combine.self="override"</code> 禁用 <code>release</code> 参数，退回到 <code>--source</code> + <code>--target</code> 模式：</p>
+<pre><code>&lt;plugin&gt;
+    &lt;groupId&gt;org.apache.maven.plugins&lt;/groupId&gt;
+    &lt;artifactId&gt;maven-compiler-plugin&lt;/artifactId&gt;
+    &lt;configuration&gt;
+        <strong>&lt;release combine.self="override"/&gt;</strong>
+        &lt;source&gt;17&lt;/source&gt;
+        &lt;target&gt;17&lt;/target&gt;
+        &lt;compilerArgs&gt;
+            &lt;arg&gt;--add-exports&lt;/arg&gt;
+            &lt;arg&gt;java.base/sun.nio.ch=ALL-UNNAMED&lt;/arg&gt;
+        &lt;/compilerArgs&gt;
+    &lt;/configuration&gt;
+&lt;/plugin&gt;</code></pre>
+
+            <h5>知识点</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:180px">编译模式</th><th>行为</th><th>内部 API 访问</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>--release N</code></td>
+                        <td>同时控制 source、target 和 bootclasspath，严格限定到 JDK N 的公开 API</td>
+                        <td>禁止</td>
+                    </tr>
+                    <tr>
+                        <td><code>--source N</code> + <code>--target N</code></td>
+                        <td>仅控制语法级别和字节码版本，使用当前 JDK 的完整 classpath</td>
+                        <td>允许（配合 --add-exports）</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-002 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-002"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-002：空 release 属性导致 NumberFormatException</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-secondary">编译阶段</span>
+                <span class="timeline-badge">2026-03-11</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>[WARNING] Error creating missing package info classes
+java.lang.NumberFormatException: For input string: ""
+    at java.lang.Integer.parseInt (Integer.java:678)
+    at org.apache.maven.plugin.compiler.AbstractCompilerMojo.getOpcode
+        (AbstractCompilerMojo.java:1391)</code></pre>
+
+            <h5>根因分析</h5>
+            <p>
+                在解决 ISS-001 时，最初尝试在 <code>&lt;properties&gt;</code> 中将 <code>maven.compiler.release</code> 设置为空字符串：
+            </p>
+<pre><code>&lt;maven.compiler.release&gt;&lt;/maven.compiler.release&gt;  &lt;!-- 空字符串 "" --&gt;</code></pre>
+            <p>
+                <code>maven-compiler-plugin 3.13.0</code> 的 <code>AbstractCompilerMojo.getOpcode()</code> 方法会将 <code>release</code> 值
+                通过 <code>Integer.parseInt()</code> 解析为整数。空字符串 <code>""</code> 无法解析，抛出 <code>NumberFormatException</code>。
+            </p>
+
+            <div class="mermaid">
+flowchart LR
+    A["properties 中设置空值<br>release = &quot;&quot;"] -->|传递给| B["AbstractCompilerMojo<br>.getOpcode()"]
+    B -->|调用| C["Integer.parseInt(&quot;&quot;)"]
+    C -->|抛出| D["NumberFormatException"]
+
+    style A fill:#ffc107,stroke:none
+    style D fill:#dc3545,color:#fff,stroke:none
+            </div>
+
+            <h5>错误做法 vs 正确做法</h5>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th>方式</th><th>写法</th><th>结果</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="badge bg-danger">错误</span></td>
+                        <td>在 <code>&lt;properties&gt;</code> 中设置 <code>&lt;maven.compiler.release&gt;&lt;/maven.compiler.release&gt;</code></td>
+                        <td>空字符串传入 <code>Integer.parseInt()</code>，抛 NumberFormatException</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-success">正确</span></td>
+                        <td>在插件 <code>&lt;configuration&gt;</code> 中使用 <code>&lt;release combine.self="override"/&gt;</code></td>
+                        <td>Maven POM 合并指令，彻底清除父 POM 的 release 设置，值为 null 而非空串</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>解决方案</h5>
+            <ol>
+                <li>删除 <code>&lt;properties&gt;</code> 中的 <code>&lt;maven.compiler.release&gt;&lt;/maven.compiler.release&gt;</code></li>
+                <li>在 <code>maven-compiler-plugin</code> 的 <code>&lt;configuration&gt;</code> 中使用 <code>&lt;release combine.self="override"/&gt;</code>（见 ISS-001 方案）</li>
+            </ol>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>教训：</strong><code>combine.self="override"</code> 是 Maven 的 POM 继承合并指令，
+                它告诉 Maven "不继承父 POM 的这个元素"，效果是将值设为 null（未定义），
+                而非空字符串。这是覆盖父 POM 配置的标准做法。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-003 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-003"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-003：Logback 版本冲突导致 NoClassDefFoundError</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-11</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>Exception in thread "main" java.lang.NoClassDefFoundError:
+    ch/qos/logback/core/util/StatusPrinter2
+    at org.springframework.boot.logging.logback.LogbackLoggingSystem.&lt;init&gt;
+        (LogbackLoggingSystem.java:113)
+Caused by: java.lang.ClassNotFoundException:
+    ch.qos.logback.core.util.StatusPrinter2</code></pre>
+
+            <h5>根因分析</h5>
+            <p>
+                项目在 <code>&lt;properties&gt;</code> 中手动指定了 <code>logback.version=1.4.14</code>，
+                并在依赖中使用了 <code>${logback.version}</code> 硬编码版本号。
+            </p>
+            <p>
+                <code>StatusPrinter2</code> 类是 Logback <strong>1.5.x</strong> 新增的，Spring Boot 3.4.5 的
+                <code>LogbackLoggingSystem</code> 依赖它。而 Logback 1.4.14 中不存在该类，导致运行时 <code>NoClassDefFoundError</code>。
+            </p>
+
+            <div class="mermaid">
+flowchart TB
+    subgraph "期望（Spring Boot 托管）"
+        A1["spring-boot-starter-parent 3.4.5"] -->|管理| B1["logback-classic 1.5.x"]
+        B1 -->|包含| C1["StatusPrinter2 ✓"]
+    end
+
+    subgraph "实际（手动覆盖）"
+        A2["pom.xml properties"] -->|覆盖| B2["logback-classic 1.4.14"]
+        B2 -->|不包含| C2["StatusPrinter2 ✗"]
+    end
+
+    C2 -->|运行时| D["NoClassDefFoundError"]
+
+    style C1 fill:#198754,color:#fff,stroke:none
+    style C2 fill:#dc3545,color:#fff,stroke:none
+    style D fill:#dc3545,color:#fff,stroke:none
+            </div>
+
+            <h5>版本对照</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th>Logback 版本</th><th>StatusPrinter2</th><th>Spring Boot 3.4.x 兼容</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>1.4.14</td><td><span class="badge bg-danger">无</span></td><td><span class="badge bg-danger">不兼容</span></td></tr>
+                    <tr><td>1.5.x</td><td><span class="badge bg-success">有</span></td><td><span class="badge bg-success">兼容</span></td></tr>
+                </tbody>
+            </table>
+
+            <h5>解决方案</h5>
+            <ol>
+                <li>删除 <code>&lt;properties&gt;</code> 中的 <code>&lt;logback.version&gt;1.4.14&lt;/logback.version&gt;</code></li>
+                <li>移除 <code>logback-classic</code> 依赖上的 <code>&lt;version&gt;</code> 标签，交由 Spring Boot parent POM 统一管理</li>
+            </ol>
+
+            <h6>修改前</h6>
+<pre><code>&lt;properties&gt;
+    &lt;logback.version&gt;1.4.14&lt;/logback.version&gt;   &lt;!-- 删除此行 --&gt;
+&lt;/properties&gt;
+
+&lt;dependency&gt;
+    &lt;groupId&gt;ch.qos.logback&lt;/groupId&gt;
+    &lt;artifactId&gt;logback-classic&lt;/artifactId&gt;
+    &lt;version&gt;${logback.version}&lt;/version&gt;          &lt;!-- 删除 version --&gt;
+&lt;/dependency&gt;</code></pre>
+
+            <h6>修改后</h6>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;ch.qos.logback&lt;/groupId&gt;
+    &lt;artifactId&gt;logback-classic&lt;/artifactId&gt;
+    &lt;!-- 版本由 spring-boot-starter-parent 统一管理 --&gt;
+&lt;/dependency&gt;</code></pre>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-004 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-004"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-004：依赖版本冲突批量清理</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-secondary">编译 + 运行时</span>
+                <span class="timeline-badge">2026-03-11</span>
+            </div>
+
+            <h5>问题概述</h5>
+            <p>整合 Spring Boot 后，pom.xml 中存在多处依赖版本冲突，包括重复引入、手动降级、插件冲突等 6 类问题。</p>
+
+            <h5>排查发现的问题清单</h5>
+            <table class="table table-bordered table-hover">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>问题</th><th>严重程度</th><th>处理方式</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>aeron-all</code> 与 <code>aeron-cluster</code>/<code>aeron-archive</code>/<code>agrona</code> 同时存在，类路径重复</td>
+                        <td><span class="badge bg-danger">严重</span></td>
+                        <td>删除单独模块依赖，仅保留 <code>aeron-all</code></td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>sbe-tool 1.32.0</code> 与 <code>aeron-all 1.49.3</code> 内置 SBE <code>1.36.2</code> 不匹配</td>
+                        <td><span class="badge bg-danger">严重</span></td>
+                        <td>升级 <code>sbe-tool</code> 到 <code>1.36.2</code></td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><code>maven-shade-plugin</code> 与 <code>spring-boot-maven-plugin</code> 同时打 Fat JAR</td>
+                        <td><span class="badge bg-danger">严重</span></td>
+                        <td>移除 <code>maven-shade-plugin</code></td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td>slf4j/jackson/junit/mockito 手动指定低版本，覆盖 Spring Boot 托管版本</td>
+                        <td><span class="badge bg-warning text-dark">中等</span></td>
+                        <td>移除手动版本号，交由 BOM 管理</td>
+                    </tr>
+                    <tr>
+                        <td>5</td>
+                        <td><code>netty-all 4.1.100.Final</code> 降级了 Spring Boot 托管的 Netty 版本，且存在 CVE</td>
+                        <td><span class="badge bg-warning text-dark">中等</span></td>
+                        <td>移除手动版本号</td>
+                    </tr>
+                    <tr>
+                        <td>6</td>
+                        <td><code>annotations-api 6.0.53</code>（Tomcat 6 时代）已过时，Spring Boot 3.x 已自带 <code>jakarta.annotation-api</code></td>
+                        <td><span class="badge bg-info text-dark">低</span></td>
+                        <td>移除该依赖</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>核心原则</h5>
+            <div class="mermaid">
+flowchart LR
+    A["Spring Boot BOM<br>托管的依赖"] -->|不要手动指定版本| B["slf4j / logback / jackson<br>junit / mockito / netty<br>lombok / commons-lang3"]
+    C["BOM 未托管的依赖"] -->|必须手动指定版本| D["aeron / agrona / grpc<br>protobuf / disruptor / jmh"]
+
+    style A fill:#198754,color:#fff,stroke:none
+    style C fill:#0d6efd,color:#fff,stroke:none
+            </div>
+
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                <strong>aeron-all 是 Fat JAR，切勿混用！</strong>同时引入 <code>aeron-all</code> 和 <code>aeron-client</code>/<code>aeron-cluster</code>/<code>agrona</code> 会导致类路径上出现重复类，运行时行为不可预测。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-005 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-005"><i class="bi bi-arrow-repeat me-2 text-primary"></i>ISS-005：从 Parent 继承改为 BOM 导入</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-primary">架构调整</span>
+                <span class="timeline-badge">2026-03-11</span>
+            </div>
+
+            <h5>背景</h5>
+            <p>
+                原先通过 <code>&lt;parent&gt; spring-boot-starter-parent</code> 继承 Spring Boot 配置。
+                这种方式占用了唯一的 parent 位置，不便于将来引入公司内部父 POM 或多模块结构。
+                改为 BOM（<code>dependencyManagement</code> + <code>import</code>）方式更灵活。
+            </p>
+
+            <h5>两种方式对比</h5>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th style="width:160px">特性</th><th>Parent 继承</th><th>BOM 导入</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>依赖版本管理</td>
+                        <td>自动</td>
+                        <td>自动（通过 BOM）</td>
+                    </tr>
+                    <tr>
+                        <td>插件版本 & 默认配置</td>
+                        <td>自动继承</td>
+                        <td><strong>需手动指定</strong>（如 <code>spring-boot-maven-plugin</code> 的 version 和 repackage goal）</td>
+                    </tr>
+                    <tr>
+                        <td>parent 位置</td>
+                        <td>被占用</td>
+                        <td><strong>空闲</strong>，可用于公司内部 POM</td>
+                    </tr>
+                    <tr>
+                        <td><code>maven.compiler.release</code></td>
+                        <td>parent 自动设置，需 override</td>
+                        <td><strong>无影响</strong>，可直接使用 source/target</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>改动要点</h5>
+            <h6>改动前（Parent 继承）</h6>
+<pre><code>&lt;parent&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-parent&lt;/artifactId&gt;
+    &lt;version&gt;3.4.5&lt;/version&gt;
+&lt;/parent&gt;</code></pre>
+
+            <h6>改动后（BOM 导入）</h6>
+<pre><code>&lt;properties&gt;
+    &lt;spring-boot.version&gt;3.4.5&lt;/spring-boot.version&gt;
+&lt;/properties&gt;
+
+&lt;dependencyManagement&gt;
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+            &lt;artifactId&gt;spring-boot-dependencies&lt;/artifactId&gt;
+            &lt;version&gt;${spring-boot.version}&lt;/version&gt;
+            &lt;type&gt;pom&lt;/type&gt;
+            &lt;scope&gt;import&lt;/scope&gt;
+        &lt;/dependency&gt;
+    &lt;/dependencies&gt;
+&lt;/dependencyManagement&gt;</code></pre>
+
+            <h5>额外需要补充的配置</h5>
+<pre><code>&lt;!-- BOM 模式下需显式指定 spring-boot-maven-plugin 版本和 repackage goal --&gt;
+&lt;plugin&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-maven-plugin&lt;/artifactId&gt;
+    &lt;version&gt;${spring-boot.version}&lt;/version&gt;
+    &lt;executions&gt;
+        &lt;execution&gt;
+            &lt;goals&gt;
+                &lt;goal&gt;repackage&lt;/goal&gt;
+            &lt;/goals&gt;
+        &lt;/execution&gt;
+    &lt;/executions&gt;
+&lt;/plugin&gt;</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>附带收益：</strong>改为 BOM 后，ISS-001 中 <code>&lt;release combine.self="override"/&gt;</code> 的 hack 不再需要了，
+                因为不再有 parent 自动设置 <code>maven.compiler.release</code>。编译插件配置更简洁。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-006 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-006"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-006：@Value 与 @ConfigurationProperties 混用导致 TypeMismatchException</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-15</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>Caused by: org.springframework.beans.TypeMismatchException:
+    Failed to convert value of type 'java.lang.String' to required type
+    'java.lang.Integer'; For input string: "nodeId"
+    at org.springframework.beans.TypeConverterSupport.convertIfNecessary
+    at org.springframework.beans.factory.support.DefaultListableBeanFactory
+        .doResolveDependency</code></pre>
+
+            <h5>根因分析</h5>
+            <p>
+                <code>AeronClusterConfiguration</code> 类同时使用了 <code>@ConfigurationProperties</code> 和 <code>@Value</code> 注解，
+                且 <code>@Value</code> 的写法错误：
+            </p>
+<pre><code>@Configuration
+@ConfigurationProperties(prefix = "laser.aeron.cluster.config")
+public class AeronClusterConfiguration {
+
+    @Value("nodeId")         // ← 错误！传入字面量字符串 "nodeId"
+    private Integer nodeId;
+
+    @Value("baseDir")        // ← 错误！传入字面量字符串 "baseDir"
+    private String baseDirectory;
+}</code></pre>
+            <p>问题出在三处：</p>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>问题</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>@Value("nodeId")</code> 缺少 <code>${}</code> 占位符</td>
+                        <td>Spring 将 <code>"nodeId"</code> 作为字面量注入，而非读取配置属性。字面量 <code>"nodeId"</code> 无法转为 <code>Integer</code>，抛出 <code>TypeMismatchException</code></td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>@Value</code> 与 <code>@ConfigurationProperties</code> 混用</td>
+                        <td>两者是不同的属性绑定机制，同时使用会导致绑定冲突和语义混乱</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>字段名 <code>baseDirectory</code> 与配置属性名 <code>baseDir</code> 不匹配</td>
+                        <td><code>@ConfigurationProperties</code> 通过字段名与配置属性名进行自动绑定，名称不一致无法自动匹配</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="mermaid">
+flowchart TB
+    A["@Value(&quot;nodeId&quot;)"] -->|注入字面量| B["String &quot;nodeId&quot;"]
+    B -->|类型转换| C["Integer.parseInt(&quot;nodeId&quot;)"]
+    C -->|失败| D["TypeMismatchException"]
+
+    E["@Value(&quot;${laser.aeron...nodeId}&quot;)"] -->|读取配置| F["String &quot;0&quot;"]
+    F -->|类型转换| G["Integer 0 ✓"]
+
+    style A fill:#dc3545,color:#fff,stroke:none
+    style D fill:#dc3545,color:#fff,stroke:none
+    style E fill:#198754,color:#fff,stroke:none
+    style G fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>@Value 与 @ConfigurationProperties 对比</h5>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th style="width:180px">特性</th><th>@Value</th><th>@ConfigurationProperties</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>绑定方式</td>
+                        <td>逐个字段指定完整属性路径 <code>${key}</code></td>
+                        <td>通过 <code>prefix</code> + 字段名自动映射</td>
+                    </tr>
+                    <tr>
+                        <td>松散绑定</td>
+                        <td><span class="badge bg-danger">不支持</span></td>
+                        <td><span class="badge bg-success">支持</span>（kebab-case、camelCase 等）</td>
+                    </tr>
+                    <tr>
+                        <td>类型安全</td>
+                        <td>弱（字符串注入后转换）</td>
+                        <td>强（编译期可配合 <code>@Validated</code>）</td>
+                    </tr>
+                    <tr>
+                        <td>适用场景</td>
+                        <td>单个值注入</td>
+                        <td>结构化配置组（推荐）</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>解决方案</h5>
+            <ol>
+                <li>移除所有 <code>@Value</code> 注解，由 <code>@ConfigurationProperties</code> 统一绑定</li>
+                <li>将字段名 <code>baseDirectory</code> 改为 <code>baseDir</code>，与配置属性名保持一致</li>
+                <li>添加 Lombok <code>@Getter</code> / <code>@Setter</code>（<code>@ConfigurationProperties</code> 需要通过 setter 注入属性值）</li>
+            </ol>
+
+            <h6>修改前</h6>
+<pre><code>@Configuration
+@ConfigurationProperties(prefix = "laser.aeron.cluster.config")
+public class AeronClusterConfiguration {
+
+    @Value("nodeId")
+    private Integer nodeId;
+
+    @Value("baseDir")
+    private String baseDirectory;
+}</code></pre>
+
+            <h6>修改后</h6>
+<pre><code>@Configuration
+@ConfigurationProperties(prefix = "laser.aeron.cluster.config")
+@Getter
+@Setter
+public class AeronClusterConfiguration {
+
+    private Integer nodeId;
+
+    private String baseDir;
+}</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>最佳实践：</strong>对于结构化配置，优先使用 <code>@ConfigurationProperties</code> 而非 <code>@Value</code>。
+                前者支持松散绑定、类型安全校验、嵌套对象映射，是 Spring Boot 推荐的配置绑定方式。
+                <code>@Value</code> 更适合注入单个简单值（如 <code>@Value("${server.port}")</code>）。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-007 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-007"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-007：ClusterNodeBoot 集群启动器多处隐患</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>问题概述</h5>
+            <p>
+                Code Review 发现 <code>ClusterNodeBoot</code> 中存在 5 处 Bug，涉及端点格式拼接错误、
+                目录路径缺失、Spring 启动阻塞、资源泄漏及目录创建失败等问题。
+            </p>
+
+            <h5>Bug 清单</h5>
+            <table class="table table-bordered table-hover">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>问题</th><th>严重程度</th><th>位置</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>buildClusterMembers()</code> 拼接端点缺少 <code>:</code> 分隔符，生成 <code>localhost9000</code> 而非 <code>localhost:9000</code></td>
+                        <td><span class="badge bg-danger">致命</span></td>
+                        <td>ClusterNodeBoot:168-180</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>clusterDir</code> 路径仅使用前缀 <code>"node-"</code>，缺少 nodeId 拼接，所有节点共享同一目录</td>
+                        <td><span class="badge bg-danger">致命</span></td>
+                        <td>ClusterNodeBoot:40</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><code>@PostConstruct</code> 中 <code>Thread.currentThread().join()</code> 永久阻塞 Spring Bean 初始化，导致 ApplicationContext 无法启动完成</td>
+                        <td><span class="badge bg-danger">致命</span></td>
+                        <td>ClusterNodeBoot:32,127</td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td>ShutdownHook 仅打印日志，无实际关闭 Aeron 组件的逻辑，try-with-resources 的 <code>close()</code> 因 <code>join()</code> 永远不会执行</td>
+                        <td><span class="badge bg-warning text-dark">中等</span></td>
+                        <td>ClusterNodeBoot:123-125</td>
+                    </tr>
+                    <tr>
+                        <td>5</td>
+                        <td><code>mkdir()</code> 仅创建最后一级目录，父目录不存在时静默失败</td>
+                        <td><span class="badge bg-info text-dark">低</span></td>
+                        <td>ClusterNodeBoot:48</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- Bug-1 端点分隔符 -->
+            <h5>Bug-1：端点缺少冒号分隔符</h5>
+            <p>
+                Aeron Cluster 的 <code>clusterMembers</code> 要求端点格式为 <code>hostname:port</code>，
+                但 <code>buildClusterMembers()</code> 中直接拼接 <code>nodeIp</code> + <code>port</code>，缺少 <code>:</code>。
+            </p>
+
+            <div class="mermaid">
+flowchart LR
+    A["nodeIp = &quot;localhost&quot;"] -->|直接拼接 port| B["localhost9000"]
+    B -->|Aeron 解析| C["端点格式错误"]
+
+    A -->|拼接 &quot;:&quot; + port| D["localhost:9000"]
+    D -->|Aeron 解析| E["正确 ✓"]
+
+    style B fill:#dc3545,color:#fff,stroke:none
+    style C fill:#dc3545,color:#fff,stroke:none
+    style D fill:#198754,color:#fff,stroke:none
+    style E fill:#198754,color:#fff,stroke:none
+            </div>
+
+<pre><code>// 改前
+memberUri.append(getNodeIp()).append(getCLIENT_FACING_PORT_BASE() + i);
+// → "localhost9000"
+
+// 改后
+memberUri.append(getNodeIp()).append(":").append(getCLIENT_FACING_PORT_BASE() + i);
+// → "localhost:9000"</code></pre>
+
+            <!-- Bug-2 目录路径 -->
+            <h5>Bug-2：clusterDir 缺少 nodeId</h5>
+<pre><code>// 改前: 所有节点共享 /tmp/laser/node-
+new File(baseDir, CLUSTER_DIR_PREFIX)
+
+// 改后: 每个节点独立 /tmp/laser/node-0, /tmp/laser/node-1, ...
+new File(baseDir, CLUSTER_DIR_PREFIX + nodeId)</code></pre>
+
+            <!-- Bug-3 @PostConstruct 阻塞 -->
+            <h5>Bug-3：@PostConstruct 阻塞 Spring 启动</h5>
+            <p>
+                <code>@PostConstruct</code> 在 Spring Bean 初始化阶段执行。方法内调用
+                <code>Thread.currentThread().join()</code> 使当前线程等待自己结束（永远阻塞），
+                导致 Spring <code>ApplicationContext</code> 初始化无法完成，Embedded Tomcat 不会启动。
+            </p>
+
+            <div class="mermaid">
+flowchart TB
+    subgraph "改前（阻塞）"
+        A1["Spring init"] --> B1["@PostConstruct"]
+        B1 --> C1["launch Aeron"]
+        C1 --> D1["Thread.join()"]
+        D1 -->|永远阻塞| E1["Spring 启动不完成 ✗"]
+    end
+
+    subgraph "改后（非阻塞）"
+        A2["Spring init"] --> B2["@PostConstruct"]
+        B2 --> C2["启动 daemon 线程"]
+        C2 -->|立即返回| D2["Spring 启动完成 ✓"]
+        C2 -->|daemon 线程| E2["launch Aeron"]
+    end
+
+    style E1 fill:#dc3545,color:#fff,stroke:none
+    style D2 fill:#198754,color:#fff,stroke:none
+            </div>
+
+<pre><code>// 改后: 使用 daemon 线程启动集群，不阻塞 Spring 初始化
+@PostConstruct
+void initCluster() {
+    Thread clusterThread = new Thread(this::launchCluster, "aeron-cluster-main");
+    clusterThread.setDaemon(true);
+    clusterThread.start();
+}</code></pre>
+
+            <!-- Bug-4 资源泄漏 -->
+            <h5>Bug-4：ShutdownHook 无关闭逻辑 → 改用 @PreDestroy</h5>
+            <p>
+                原 ShutdownHook 仅打印日志，Aeron 组件（MediaDriver、Archive、ConsensusModule、ServiceContainer）
+                在 JVM 退出时不会被正确关闭。改用 Spring 的 <code>@PreDestroy</code> 生命周期回调，
+                配合 Agrona 的 <code>CloseHelper.quietClose()</code> 按序释放资源。
+            </p>
+
+<pre><code>// 改前: ShutdownHook 仅打日志
+Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+    log.info("shutdown handling....");
+}));
+
+// 改后: Spring 容器关闭时自动调用
+@PreDestroy
+void shutdown() {
+    log.info("Shutting down Aeron cluster...");
+    CloseHelper.quietClose(clusteredServiceContainer);
+    CloseHelper.quietClose(clusteredMediaDriver);
+    log.info("Aeron cluster shutdown complete.");
+}</code></pre>
+
+            <!-- Bug-5 mkdir -->
+            <h5>Bug-5：mkdir() → mkdirs()</h5>
+<pre><code>// 改前: 父目录 /tmp/laser 不存在时创建失败
+clusterDir.mkdir()
+
+// 改后: 递归创建所有缺失的父目录
+clusterDir.mkdirs()</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>教训：</strong>Aeron 集群组件的生命周期应独立于 Spring Bean 初始化流程。
+                使用独立 daemon 线程启动集群，通过 <code>@PreDestroy</code> 优雅关闭，
+                既不阻塞 Spring 启动，又能在容器关闭时正确释放底层资源。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-008 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-008"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-008：cluster.sh 空数组展开导致 start 命令失效</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>错误现象</h5>
+            <p>
+                <code>./cluster.sh start-single</code> 正常工作，但 <code>./cluster.sh start 0</code>
+                和 <code>./cluster.sh start-all</code> 均无法启动节点，脚本静默退出。
+            </p>
+
+            <h5>根因分析</h5>
+            <p>
+                <code>do_start_node()</code> 函数接收可选的额外 JVM 参数，内部通过 <code>shift</code>
+                后将剩余参数赋值给数组：
+            </p>
+<pre><code>do_start_node() {
+    local nid="$1"; shift
+    local extra_props=("$@")   # start 0 时为空数组
+    ...
+    nohup java ... "${extra_props[@]}" -jar ...
+    #             ^^^^^^^^^^^^^^^^^^^ 空数组展开触发错误
+}</code></pre>
+
+            <p>脚本头部设置了 <code>set -euo pipefail</code>，其中 <code>-u</code>（nounset）
+            要求所有变量必须已定义。macOS 自带的 <strong>bash 3.2</strong> 将空数组
+            <code>"${arr[@]}"</code> 视为未绑定变量，触发 <code>unbound variable</code> 错误并退出。
+            bash 4.4+ 修复了此行为，空数组展开不再报错。</p>
+
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th>调用方式</th><th><code>extra_props</code></th><th>bash 3.2 + <code>set -u</code></th><th>结果</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>start-single</code></td>
+                        <td><code>("-Dlaser...=1")</code> 非空</td>
+                        <td>正常展开</td>
+                        <td><span class="badge bg-success">正常</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>start 0</code></td>
+                        <td><code>()</code> 空数组</td>
+                        <td><strong>unbound variable</strong></td>
+                        <td><span class="badge bg-danger">脚本退出</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="mermaid">
+flowchart LR
+    A["start 0"] --> B["do_start_node 0"]
+    B --> C["shift → $@ 为空"]
+    C --> D["extra_props=()"]
+    D --> E["&quot;${extra_props[@]}&quot;"]
+    E -->|bash 3.2 + set -u| F["unbound variable → 脚本退出"]
+
+    style F fill:#dc3545,color:#fff,stroke:none
+            </div>
+
+            <h5>解决方案</h5>
+            <p>去掉中间变量 <code>extra_props</code>，直接使用 <code>${@+"$@"}</code> 展开剩余参数。
+            这是 bash 的标准兼容写法：当 <code>$@</code> 为空时不展开，非空时正常展开，兼容所有 bash 版本。</p>
+
+<pre><code># 改前: 空数组在 bash 3.2 + set -u 下报错
+local extra_props=("$@")
+nohup java ... "${extra_props[@]}" -jar ...
+
+# 改后: ${@+"$@"} 兼容所有 bash 版本
+nohup java ... ${@+"$@"} -jar ...</code></pre>
+
+            <h5>同步进行的 Linux 兼容性加固</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>修改</th><th>原因</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>#!/bin/bash</code> → <code>#!/usr/bin/env bash</code></td>
+                        <td>部分 Linux 发行版（NixOS、Alpine、容器镜像）bash 不在 <code>/bin/bash</code>，<code>env</code> 方式从 PATH 查找更通用</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>echo -e</code> → <code>printf</code></td>
+                        <td><code>echo -e</code> 行为依赖 bash 的 <code>xpg_echo</code> 选项，<code>printf</code> 是 POSIX 标准，跨平台行为一致</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>Shell 脚本跨平台经验：</strong>
+                (1) 使用 <code>#!/usr/bin/env bash</code> 替代硬编码路径；
+                (2) 用 <code>printf</code> 替代 <code>echo -e</code>；
+                (3) <code>set -u</code> 下避免直接展开可能为空的数组，用 <code>${arr[@]+"${arr[@]}"}</code> 或 <code>${@+"$@"}</code> 防御。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 附录 ========== -->
+    <!-- ========================================================== -->
+    <!-- ISS-009 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-009"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-009：onStart() 中 cluster.memberId() 返回 -1</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>onStart memberId:-1, role:FOLLOWER</code></pre>
+            <p>
+                启动集群节点时，<code>onStart()</code> 方法中调用 <code>cluster.memberId()</code> 始终返回 <code>-1</code>，
+                即使在 <code>application.properties</code> 和 <code>-D</code> 参数中已经正确设置了 <code>nodeId</code>。
+            </p>
+
+            <h5>根因分析</h5>
+            <p>
+                这是 <strong>Aeron Cluster 的正常行为</strong>，而非配置错误。
+                <code>ClusteredService.onStart()</code> 回调发生在 <code>ClusteredServiceContainer</code> 初始化阶段，
+                此时 Service Container 尚未完成与 Consensus Module 的连接握手。
+            </p>
+            <p>
+                <code>cluster.memberId()</code> 的值由 Consensus Module 在握手完成后写入，
+                在 <code>onStart()</code> 阶段该字段尚未被赋值，因此返回默认值 <code>-1</code>。
+            </p>
+
+            <div class="mermaid">
+sequenceDiagram
+    participant SC as ServiceContainer
+    participant CM as ConsensusModule
+    participant CS as ClusteredService
+
+    SC->>CS: onStart(cluster, snapshot)
+    Note over CS: cluster.memberId() = -1<br>握手尚未完成
+
+    SC->>CM: 连接握手
+    CM-->>SC: 返回 memberId
+
+    Note over CS: 此后 memberId() 可用
+
+    CM->>CS: onRoleChange(newRole)
+    Note over CS: cluster.memberId() = 正确值
+            </div>
+
+            <h5>Aeron 生命周期回调中 memberId 可用性</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:220px">回调方法</th><th>memberId()</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>onStart()</code></td>
+                        <td><span class="badge bg-danger">-1（不可用）</span></td>
+                        <td>Service Container 尚未与 Consensus Module 完成握手</td>
+                    </tr>
+                    <tr>
+                        <td><code>onRoleChange()</code></td>
+                        <td><span class="badge bg-success">正确值</span></td>
+                        <td>已完成握手，memberId 已被赋值</td>
+                    </tr>
+                    <tr>
+                        <td><code>onSessionMessage()</code></td>
+                        <td><span class="badge bg-success">正确值</span></td>
+                        <td>正常运行阶段</td>
+                    </tr>
+                    <tr>
+                        <td><code>onTerminate()</code></td>
+                        <td><span class="badge bg-success">正确值</span></td>
+                        <td>关闭阶段，仍可用</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>解决方案</h5>
+            <p>
+                在 <code>onStart()</code> 中使用 Spring 配置中的 <code>nodeId</code> 替代 <code>cluster.memberId()</code>；
+                在 <code>onRoleChange()</code> 等后续回调中正常使用 <code>cluster.memberId()</code>。
+            </p>
+<pre><code>@Resource
+private AeronClusterConfiguration aeronClusterConfiguration;
+
+@Override
+public void onStart(Cluster cluster, Image snapshotImage) {
+    this.cluster = cluster;
+    this.currentRole = cluster.role();
+    // onStart 阶段 cluster.memberId() 返回 -1，使用配置中的 nodeId
+    log.info("onStart nodeId:{}, role:{}",
+        aeronClusterConfiguration.getNodeId(), currentRole);
+}
+
+@Override
+public void onRoleChange(Cluster.Role newRole) {
+    Cluster.Role previousRole = this.currentRole;
+    this.currentRole = newRole;
+    // onRoleChange 阶段 memberId() 已可用
+    log.info("onRoleChange memberId:{}, {} -> {}",
+        cluster.memberId(), previousRole, newRole);
+}</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>关键认知：</strong>Aeron Cluster 的 <code>onStart()</code> 回调时机早于 Consensus Module 握手完成，
+                因此 <code>cluster.memberId()</code> 在此阶段不可用。如需在启动时获取节点标识，
+                应通过外部配置（如 Spring <code>@ConfigurationProperties</code>）传入。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-010 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-010"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-010：ClusterEvent 心跳超时被误报为 ERROR</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>[consensus-module-0-1] ERROR c.l.matching.cluster.ClusterNodeBoot - ConsensusModule occurred errorHandler.
+io.aeron.cluster.client.ClusterEvent: WARN - leader heartbeat timeout</code></pre>
+            <p>
+                手动关掉 Leader 节点后，某个 Follower 节点报 <code>ERROR</code> 级别日志。
+                实际上这是 Raft 协议检测到 Leader 失联后触发选举的<strong>正常行为</strong>。
+            </p>
+
+            <h5>根因分析</h5>
+            <p>
+                Aeron Cluster 将集群事件（如心跳超时、选举等）通过 <code>ErrorHandler</code> 回调传递，
+                而原来的 error handler 对所有回调统一使用 <code>log.error</code> 输出。
+            </p>
+            <p>
+                关键在于 <code>ClusterEvent</code> 的继承链：
+            </p>
+<pre><code>ClusterEvent → AeronEvent → AeronException → ... → Throwable</code></pre>
+            <p>
+                <code>AeronEvent</code> 默认 category 为 <code>WARN</code>，且<strong>不携带 stack trace</strong>（轻量级事件），
+                属于 Raft 协议正常运行的一部分，不应以 ERROR 级别记录。
+            </p>
+
+            <div class="mermaid">
+flowchart LR
+    A["Leader 被关闭"] --> B["Follower 心跳超时"]
+    B --> C["ClusterEvent<br>WARN 级别"]
+    C -->|旧代码| D["log.error 输出<br>误报为严重错误"]
+    C -->|新代码| E["log.warn 输出<br>正确反映事件级别"]
+
+    style D fill:#dc3545,color:#fff,stroke:none
+    style E fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>解决方案</h5>
+            <p>
+                将 4 个独立的 <code>ErrorHandler</code> lambda 合并为统一的 <code>buildErrorHandler(String component)</code> 方法，
+                根据异常类型智能路由日志级别：
+            </p>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:200px">Throwable 类型</th><th>日志级别</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>ClusterEvent</code></td>
+                        <td><span class="badge bg-warning text-dark">WARN</span></td>
+                        <td>集群事件（心跳超时、选举等），Raft 正常行为</td>
+                    </tr>
+                    <tr>
+                        <td>其他 <code>Throwable</code></td>
+                        <td><span class="badge bg-danger">ERROR</span></td>
+                        <td>真正的组件异常</td>
+                    </tr>
+                </tbody>
+            </table>
+<pre><code>private ErrorHandler buildErrorHandler(String component) {
+    return throwable -> {
+        if (throwable instanceof ClusterEvent) {
+            log.warn("[{}] {}", component, throwable.getMessage());
+        } else {
+            log.error("[{}] errorHandler.", component, throwable);
+        }
+    };
+}</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>经验：</strong>Aeron 的 <code>ErrorHandler</code> 不仅传递真正的异常，也传递集群事件。
+                通过 <code>instanceof ClusterEvent</code> 区分后，可避免误报并保留有效的告警信息。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-011 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-011"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-011：Logback 多节点日志混写及配置优化</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-warning text-dark">运行时</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>错误现象</h5>
+            <p>启动节点 1 后，日志文件路径中 NODE_ID 始终为 0，所有节点日志混写到同一个文件：</p>
+<pre><code># 节点 1 的日志文件路径（错误）
+/Users/snowalker/log/laser/matching-system-0.log   ← 应该是 matching-system-1.log
+
+# Logback 内部状态输出
+value "0" substituted for "${NODE_ID:-0}"</code></pre>
+            <p>同时伴随两个附带问题：</p>
+            <ul>
+                <li><code>SizeAndTimeBasedFNATP</code> 弃用警告（大量 WARN）</li>
+                <li>应用关闭时 Logback 内部状态日志泄露（大量 <code>|-INFO</code> 行）</li>
+            </ul>
+
+            <h5>根因分析</h5>
+            <p>本次涉及 3 个独立子问题：</p>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th style="width:220px">子问题</th><th>根因</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><strong>NODE_ID 始终为 0</strong></td>
+                        <td>
+                            <code>logback.xml</code> 中使用 <code>${NODE_ID:-0}</code> 引用系统属性，
+                            但 <code>cluster.sh</code> 传递的是 <code>-Dlaser.aeron.cluster.config.nodeId=1</code>，
+                            <strong>变量名不匹配</strong>，始终回退到默认值 0
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><strong>SizeAndTimeBasedFNATP 弃用</strong></td>
+                        <td>
+                            使用 <code>TimeBasedRollingPolicy</code> + <code>SizeAndTimeBasedFNATP</code> 嵌套方式，
+                            Logback 1.5.x 已弃用，推荐使用 <code>SizeAndTimeBasedRollingPolicy</code>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><strong>内部状态日志泄露</strong></td>
+                        <td>
+                            应用关闭时 Spring Boot 重新初始化 Logback，缺少 <code>statusListener</code> 配置，
+                            导致 Logback 将内部初始化信息输出到 stdout
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="mermaid">
+flowchart TD
+    A["cluster.sh 传入<br>-Dlaser.aeron.cluster.config.nodeId=1"] --> B{"logback.xml 引用<br>${NODE_ID:-0}"}
+    B -->|变量名不匹配| C["NODE_ID 未定义<br>回退到 0"]
+    C --> D["所有节点写入<br>matching-system-0.log"]
+
+    A --> E{"修复后引用<br>${laser.aeron.cluster.config.nodeId:-0}"}
+    E -->|变量名匹配| F["NODE_ID = 1"]
+    F --> G["节点 1 写入<br>matching-system-1.log"]
+
+    style D fill:#dc3545,color:#fff,stroke:none
+    style G fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>解决方案</h5>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>修复前</th><th>修复后</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>${NODE_ID:-0}</code></td>
+                        <td><code>${laser.aeron.cluster.config.nodeId:-0}</code><br>与 <code>-D</code> 参数名保持一致</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>TimeBasedRollingPolicy</code> + <code>SizeAndTimeBasedFNATP</code></td>
+                        <td><code>SizeAndTimeBasedRollingPolicy</code><br>直接使用新版 API，消除 WARN</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>（无 statusListener 配置）</td>
+                        <td><code>&lt;statusListener class="...NopStatusListener"/&gt;</code><br>抑制内部状态输出</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>修复后的 logback.xml 关键片段</h5>
+<pre><code>&lt;configuration&gt;
+    &lt;!-- 抑制内部状态日志 --&gt;
+    &lt;statusListener class="ch.qos.logback.core.status.NopStatusListener"/&gt;
+
+    &lt;!-- 与 -Dlaser.aeron.cluster.config.nodeId 保持一致 --&gt;
+    &lt;property name="NODE_ID"
+              value="${laser.aeron.cluster.config.nodeId:-0}" /&gt;
+
+    &lt;appender name="FILE" class="...RollingFileAppender"&gt;
+        &lt;file&gt;${user.home}/log/laser/matching-system-${NODE_ID}.log&lt;/file&gt;
+        &lt;!-- 直接使用 SizeAndTimeBasedRollingPolicy --&gt;
+        &lt;rollingPolicy class="...SizeAndTimeBasedRollingPolicy"&gt;
+            &lt;fileNamePattern&gt;...${NODE_ID}.%d{yyyy-MM-dd}.%i.log&lt;/fileNamePattern&gt;
+            &lt;maxFileSize&gt;100MB&lt;/maxFileSize&gt;
+            &lt;maxHistory&gt;30&lt;/maxHistory&gt;
+        &lt;/rollingPolicy&gt;
+        ...
+    &lt;/appender&gt;
+&lt;/configuration&gt;</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>经验：</strong>Logback 的 <code>${property}</code> 占位符解析 JVM <code>-D</code> 系统属性时，
+                属性名必须<strong>完全匹配</strong>。当属性名含有多级前缀（如 <code>laser.aeron.cluster.config.nodeId</code>）时，
+                Logback 可以直接引用，不需要额外的 Spring 桥接。
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- ISS-012 -->
+    <!-- ========================================================== -->
+    <h2 id="issue-012"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>ISS-012：OrderBookTest amendOrder 测试编译失败</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已解决</span>
+                <span class="badge bg-secondary">单元测试</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>错误现象</h5>
+<pre><code>[ERROR] OrderBookTest.java:[297,47] 无法将类 OrderBook 中的方法 amendOrder 应用到给定类型;
+  需要: MatchOrder, MatchOrder
+  找到: MatchOrder
+  原因: 实际参数列表和形式参数列表长度不同</code></pre>
+            <p>
+                4 处测试代码调用 <code>amendOrder(amendedOrder)</code> 只传了 1 个参数，
+                但生产代码签名已改为 <code>amendOrder(MatchOrder amendedOrder, MatchOrder originalOrder)</code>，
+                导致测试编译失败。
+            </p>
+
+            <h5>根因分析</h5>
+            <p>
+                <code>OrderBook.amendOrder()</code> 重构为「先撤原单再下新单」两步式改单，
+                需要同时传入<strong>原订单</strong>（用于 <code>removeOrder</code>）和<strong>新订单</strong>（用于 <code>addOrder</code>），
+                但对应的 4 处测试代码未同步更新。
+            </p>
+
+            <div class="mermaid">
+flowchart LR
+    A["amendOrder 签名变更<br>(1参数 → 2参数)"] --> B["4处测试仍传1个参数"]
+    B --> C["编译失败"]
+    C --> D["补传 originalOrder 参数"]
+    D --> E["编译通过 + 测试通过"]
+
+    style C fill:#dc3545,color:#fff,stroke:none
+    style E fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>涉及的测试方法</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>测试方法</th><th>修复方式</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><code>amendOrder_notExists_shouldDoNothing</code></td>
+                        <td>传入 <code>(order, order)</code>；调整断言：<code>amendOrder</code> 内 <code>removeOrder</code> 静默跳过 + <code>addOrder</code> 正常执行，orderMap 应有 1 条记录</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><code>amendOrder_changePrice_shouldSwitchDepthLine</code></td>
+                        <td>传入 <code>(amendedOrder, order)</code>，<code>order</code> 为先前 <code>addOrder</code> 的原订单</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><code>amendOrder_changeQty_shouldStayInSameDepthLine</code></td>
+                        <td>同上，传入 <code>(amendedOrder, order)</code></td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td><code>IntegrationTest.fullOrderLifecycle</code></td>
+                        <td>先 <code>getOrder(2001L)</code> 获取原订单引用，再传入 <code>(amendedOrder, originalSellOrder)</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>amendOrder 生产代码行为</h5>
+<pre><code>public void amendOrder(MatchOrder amendedOrder, MatchOrder originalOrder) {
+    removeOrder(originalOrder);   // 撤原单（不存在时静默跳过）
+    addOrder(amendedOrder);       // 下新单
+}</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>经验：</strong>重构方法签名后，务必同步更新所有调用方，包括单元测试。
+                使用 IDE 的「Find Usages」或 <code>mvn test-compile</code> 可以快速发现遗漏。
+            </div>
+        </div>
+    </div>
+
+    <h2 id="issue-013"><i class="bi bi-diagram-3 me-2 text-primary"></i>ISS-013：SBE 命令分发机制 (CommandDispatcher)</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已完成</span>
+                <span class="badge bg-primary">架构设计</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>设计目标</h5>
+            <p>
+                Aeron Cluster 的 <code>onSessionMessage</code> 回调将原始 SBE 二进制 buffer 传递给 <code>CommandDispatcher</code>，
+                后者需要解析消息头中的 <code>templateId</code>，将指令路由到对应的处理方法，
+                完成 SBE 解码 → 业务对象转换 → 撮合引擎调用 的全链路。
+            </p>
+
+            <h5>整体流程</h5>
+            <div class="mermaid">
+flowchart TD
+    A["onSessionMessage<br/>(buffer, offset, length)"] --> B["CommandDispatcher<br/>dispatchCommand"]
+    B --> C["MessageHeaderDecoder<br/>wrap &amp; read templateId"]
+    C --> D{templateId?}
+    D -->|100| E["handlePlace"]
+    D -->|101| F["handleAmend"]
+    D -->|102| G["handleCancel"]
+    D -->|other| H["log.error<br/>未知指令"]
+
+    E --> E1["PlaceOrderRequest.decode"]
+    E1 --> E2["symbolCode → symbolId<br/>MatchContext 查表"]
+    E2 --> E3["buildNewMatchOrder<br/>设置初始状态"]
+    E3 --> E4["matchEngine.placeOrder"]
+
+    F --> F1["AmendOrderRequest.decode"]
+    F1 --> F2["symbolCode → symbolId"]
+    F2 --> F3["matchEngine.amendOrder"]
+
+    G --> G1["CancelOrderRequest.decode"]
+    G1 --> G2["symbolCode → symbolId"]
+    G2 --> G3["matchEngine.cancelOrder"]
+
+    style D fill:#0d6efd,color:#fff,stroke:none
+    style H fill:#dc3545,color:#fff,stroke:none
+    style E4 fill:#198754,color:#fff,stroke:none
+    style F3 fill:#198754,color:#fff,stroke:none
+    style G3 fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>SBE 消息头结构</h5>
+            <p>每条 SBE 消息的前 8 字节为标准消息头 <code>messageHeader</code>，用于识别消息类型：</p>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:80px">偏移</th><th style="width:100px">长度</th><th style="width:140px">字段</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>+0</td><td>2 bytes</td><td><code>blockLength</code></td><td>消息体定长部分的字节数</td></tr>
+                    <tr><td>+2</td><td>2 bytes</td><td><code>templateId</code></td><td>消息模板编号（100/101/102）</td></tr>
+                    <tr><td>+4</td><td>2 bytes</td><td><code>schemaId</code></td><td>Schema 编号（固定 2）</td></tr>
+                    <tr><td>+6</td><td>2 bytes</td><td><code>version</code></td><td>Schema 版本（当前 0）</td></tr>
+                </tbody>
+            </table>
+
+            <h5>templateId 与指令的映射关系</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:120px">templateId</th><th style="width:200px">SBE Message</th><th style="width:200px">CmdType 常量</th><th>处理方法</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>100</code></td><td>PlaceOrderCommand</td><td><code>PLACE_ORDER_COMMAND</code></td><td><code>handlePlace()</code></td></tr>
+                    <tr><td><code>101</code></td><td>AmendOrderCommand</td><td><code>AMEND_ORDER_COMMAND</code></td><td><code>handleAmend()</code></td></tr>
+                    <tr><td><code>102</code></td><td>CancelOrderCommand</td><td><code>CANCEL_ORDER_COMMAND</code></td><td><code>handleCancel()</code></td></tr>
+                </tbody>
+            </table>
+
+            <h5>Flyweight 复用模式</h5>
+            <p>
+                Aeron Cluster 的 <code>onSessionMessage</code> 在<strong>单线程</strong>（Agent duty cycle）上串行调用。
+                利用这一特性，将解码器和请求对象声明为类级字段，每次 dispatch 时原地复用，避免热路径上的对象分配和 GC 压力：
+            </p>
+<pre><code>private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
+private final PlaceOrderRequest placeOrderRequest = new PlaceOrderRequest();
+private final AmendOrderRequest amendOrderRequest = new AmendOrderRequest();
+private final CancelOrderRequest cancelOrderRequest = new CancelOrderRequest();</code></pre>
+            <p>安全前提：每次 <code>decode()</code> 后，<strong>同步消费完数据</strong>再返回，不持有 request 引用到下一次 dispatch。</p>
+            <div class="mermaid">
+sequenceDiagram
+    participant A as Aeron Agent Thread
+    participant D as CommandDispatcher
+    participant R as PlaceOrderRequest (flyweight)
+
+    A->>D: dispatchCommand #1
+    D->>R: decode(buffer, offset)
+    Note over R: 覆盖旧状态
+    D->>D: 读取字段 → 构建 MatchOrder
+    D-->>A: 处理完毕
+
+    A->>D: dispatchCommand #2
+    D->>R: decode(buffer, offset)
+    Note over R: 再次覆盖，安全
+    D->>D: 读取字段 → 构建 MatchOrder
+    D-->>A: 处理完毕
+            </div>
+
+            <h5>symbolCode → symbolId 查表</h5>
+            <p>
+                SBE 协议中 <code>symbolCode</code>（<code>uint16</code>）为数字编码，而撮合引擎内部使用字符串标识（如 <code>SPOT_BTC_USDT</code>）。
+                通过 <code>MatchContext.getSymbolNameByCode()</code> 进行映射转换，查表失败时提前返回并记录错误日志：
+            </p>
+<pre><code>MatchContext matchContext = matchEngine.getMatchEngineState().getMatchContext();
+String symbolId = matchContext.getSymbolNameByCode(request.getSymbolCode());
+if (Objects.isNull(symbolId)) {
+    log.error("No such symbolConfig, {}", request.getSymbolCode());
+    return;
+}</code></pre>
+
+            <h5>handlePlace 下单处理</h5>
+            <p>下单是最复杂的指令，需要将 <code>PlaceOrderRequest</code> 转换为 <code>MatchOrder</code> 并设置初始状态：</p>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:200px">MatchOrder 字段</th><th style="width:200px">来源</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>orderId</code></td><td>PlaceOrderRequest</td><td>雪花算法生成</td></tr>
+                    <tr><td><code>clientOid</code></td><td>PlaceOrderRequest</td><td>客户端订单号</td></tr>
+                    <tr><td><code>accountId</code></td><td>PlaceOrderRequest</td><td>用户编码</td></tr>
+                    <tr><td><code>symbolId</code></td><td>MatchContext 查表</td><td>symbolCode → 字符串标识</td></tr>
+                    <tr><td><code>orderType / orderSide / timeInForce</code></td><td>PlaceOrderRequest</td><td>枚举直接映射</td></tr>
+                    <tr><td><code>delegatePrice / delegateCount</code></td><td>PlaceOrderRequest</td><td>BigDecimal 委托价量</td></tr>
+                    <tr><td><code>dealtCount</code></td><td>固定 <code>BigDecimal.ZERO</code></td><td>新单成交量为 0</td></tr>
+                    <tr><td><code>orderStatus</code></td><td>固定 <code>NEW</code></td><td>新单初始状态</td></tr>
+                    <tr><td><code>cancelReason</code></td><td>固定 <code>NONE</code></td><td>无撤单原因</td></tr>
+                    <tr><td><code>stpAccountId / stpStrategyEnum</code></td><td>PlaceOrderRequest</td><td>自成交保护配置</td></tr>
+                    <tr><td><code>createTime</code></td><td>Aeron 共识时间戳</td><td>集群一致性时间</td></tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>设计要点：</strong>
+                <ul class="mb-0 mt-1">
+                    <li><code>createTime</code> 使用 Aeron Cluster 的共识时间戳 <code>timestamp</code>，而非 <code>System.currentTimeMillis()</code>，确保所有节点状态一致</li>
+                    <li><code>switch(templateId)</code> 直接匹配 <code>CmdType</code> 常量，编译期类型安全，运行时零开销</li>
+                    <li>每个 handler 在使用 symbolCode 前先查表校验，防止无效指令进入撮合引擎</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <h2 id="issue-014"><i class="bi bi-box-arrow-up-right me-2 text-primary"></i>ISS-014：laser-common 公共模块抽取</h2>
+    <div class="card issue-card resolved">
+        <div class="card-body">
+            <div class="issue-header">
+                <span class="badge bg-success">已完成</span>
+                <span class="badge bg-primary">架构设计</span>
+                <span class="timeline-badge">2026-03-16</span>
+            </div>
+
+            <h5>设计目标</h5>
+            <p>
+                将 <code>com.laser.exchange.common</code> 包及其依赖抽取为独立的 Maven 项目 <code>laser-common</code>，
+                使其可被 <code>laser-matching-engine</code>（服务端）和未来的 <code>laser-mock-counter</code>（客户端）共同复用。
+            </p>
+
+            <h5>抽取方案</h5>
+            <div class="mermaid">
+flowchart LR
+    subgraph laser-common["laser-common (新建)"]
+        A1["common/<br/>PlaceOrderRequest<br/>AmendOrderRequest<br/>CancelOrderRequest"]
+        A2["common/enums/ (6个)"]
+        A3["common/config/ (2个)"]
+        A4["common/codec/ (16个SBE)"]
+        A5["utils/BigDecimalUtil"]
+        A6["src/sbe/<br/>match-engine-sbe.xml"]
+    end
+
+    subgraph engine["laser-matching-engine"]
+        B1["cluster/"]
+        B2["core/"]
+        B3["enums/"]
+    end
+
+    subgraph future["laser-mock-counter (未来)"]
+        C1["客户端指令编码"]
+    end
+
+    engine -->|"maven dependency"| laser-common
+    future -->|"maven dependency"| laser-common
+
+    style laser-common fill:#e8f5e9,stroke:#2e7d32
+    style engine fill:#e3f2fd,stroke:#1565c0
+    style future fill:#fff3e0,stroke:#ef6c00
+            </div>
+
+            <h5>关键步骤</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th style="width:280px">步骤</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td>创建 laser-common 项目骨架</td>
+                        <td>GAV: <code>com.laser.exchange.matching:laser-common:1.0.0-SNAPSHOT</code>，依赖 agrona + lombok + commons-lang3 + slf4j-api</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td>迁移 SBE 构建插件</td>
+                        <td><code>exec-maven-plugin</code>（SBE 代码生成）+ <code>build-helper-maven-plugin</code>，schema 放入 <code>src/sbe/</code></td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>迁移 13 个源文件</td>
+                        <td>common 包 11 个 + BigDecimalUtil（保持原包名 <code>com.laser.exchange.common.utils</code>）+ SBE schema</td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td>修改 engine pom.xml</td>
+                        <td>添加 <code>laser-common</code> 依赖，移除 SBE 插件配置，删除已迁移文件</td>
+                    </tr>
+                    <tr>
+                        <td>5</td>
+                        <td>修改 cluster.sh</td>
+                        <td><code>do_build()</code> 前置执行 <code>mvn clean install</code> 编译 laser-common</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>laser-common pom.xml 依赖</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th>依赖</th><th>版本</th><th>用途</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>org.agrona:agrona</code></td><td>2.3.0</td><td>DirectBuffer, Int2ObjectHashMap</td></tr>
+                    <tr><td><code>org.projectlombok:lombok</code></td><td>BOM</td><td>@Data, @Builder, @Slf4j</td></tr>
+                    <tr><td><code>org.apache.commons:commons-lang3</code></td><td>BOM</td><td>BigDecimalUtil 的 StringUtils</td></tr>
+                    <tr><td><code>org.slf4j:slf4j-api</code></td><td>BOM</td><td>BigDecimalUtil 的 @Slf4j</td></tr>
+                </tbody>
+            </table>
+
+            <h5>验证结果</h5>
+<pre><code># laser-common 独立编译：28 源文件 (12 手写 + 16 SBE 生成)
+cd laser-common && mvn clean install -DskipTests  ✅ BUILD SUCCESS
+
+# laser-matching-engine 编译：18 源文件
+cd laser-matching-engine && mvn clean compile      ✅ BUILD SUCCESS
+
+# 全量测试：137 tests, 0 failures
+mvn test                                           ✅ BUILD SUCCESS
+
+# 一键编译
+./cluster.sh build                                 ✅ 先编译 common → 再编译 engine</code></pre>
+
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-lightbulb me-1"></i>
+                <strong>设计要点：</strong>
+                <ul class="mb-0 mt-1">
+                    <li>BigDecimalUtil 保持原包名 <code>com.laser.exchange.common.utils</code>，零 import 变更</li>
+                    <li>SBE schema 的 <code>package="com.laser.exchange.common.codec"</code> 属性不变，生成代码包名不受影响</li>
+                    <li>laser-common 不依赖 Spring Boot starter 和 Aeron，保持最小依赖集</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 附录 ========== --><i class="bi bi-hdd-network me-2"></i>端口映射表</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <p>
+                每个节点的端口 = <strong>Base Port + nodeId</strong>，以下为三节点集群（nodeId: 0, 1, 2）的完整端口分配。
+            </p>
+
+            <h5>端口 Base 定义</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:240px">用途</th><th>配置来源</th><th>Base Port</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Spring Boot HTTP (Tomcat)</td><td><code>cluster.sh</code> → <code>WEB_SERVER_PORT</code></td><td><code>8080</code></td></tr>
+                    <tr><td>Archive Control Channel</td><td><code>ARCHIVE_CONTROL_PORT_BASE</code></td><td><code>8010</code></td></tr>
+                    <tr><td>Archive Replication Channel</td><td><code>ARCHIVE_REPLICATION_PORT_BASE</code></td><td><code>8020</code></td></tr>
+                    <tr><td>Archive Recording Events</td><td><code>ARCHIVE_RECORDING_EVENTS_PORT_BASE</code></td><td><code>8030</code></td></tr>
+                    <tr><td>Consensus Replication</td><td><code>CONSENSUS_REPLICATION_PORT_BASE</code></td><td><code>8040</code></td></tr>
+                    <tr><td>Client Facing (Ingress)</td><td><code>CLIENT_FACING_PORT_BASE</code></td><td><code>9000</code></td></tr>
+                    <tr><td>Member Facing (Consensus)</td><td><code>MEMBER_FACING_PORT_BASE</code></td><td><code>9100</code></td></tr>
+                    <tr><td>Log Replication</td><td><code>LOG_PORT_BASE</code></td><td><code>9200</code></td></tr>
+                    <tr><td>Snapshot Transfer</td><td><code>TRANSFER_PORT_BASE</code></td><td><code>9300</code></td></tr>
+                </tbody>
+            </table>
+
+            <h5>各节点端口分配明细</h5>
+            <table class="table table-bordered table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:240px">用途</th>
+                        <th class="text-center">Node 0</th>
+                        <th class="text-center">Node 1</th>
+                        <th class="text-center">Node 2</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Spring Boot HTTP</td>
+                        <td class="text-center"><code>8080</code></td>
+                        <td class="text-center"><code>8081</code></td>
+                        <td class="text-center"><code>8082</code></td>
+                    </tr>
+                    <tr>
+                        <td>Archive Control</td>
+                        <td class="text-center"><code>8010</code></td>
+                        <td class="text-center"><code>8011</code></td>
+                        <td class="text-center"><code>8012</code></td>
+                    </tr>
+                    <tr>
+                        <td>Archive Replication</td>
+                        <td class="text-center"><code>8020</code></td>
+                        <td class="text-center"><code>8021</code></td>
+                        <td class="text-center"><code>8022</code></td>
+                    </tr>
+                    <tr>
+                        <td>Archive Recording Events</td>
+                        <td class="text-center"><code>8030</code></td>
+                        <td class="text-center"><code>8031</code></td>
+                        <td class="text-center"><code>8032</code></td>
+                    </tr>
+                    <tr>
+                        <td>Consensus Replication</td>
+                        <td class="text-center"><code>8040</code></td>
+                        <td class="text-center"><code>8041</code></td>
+                        <td class="text-center"><code>8042</code></td>
+                    </tr>
+                    <tr class="table-info">
+                        <td><strong>Client Facing (Ingress)</strong></td>
+                        <td class="text-center"><code>9000</code></td>
+                        <td class="text-center"><code>9001</code></td>
+                        <td class="text-center"><code>9002</code></td>
+                    </tr>
+                    <tr>
+                        <td>Member Facing (Consensus)</td>
+                        <td class="text-center"><code>9100</code></td>
+                        <td class="text-center"><code>9101</code></td>
+                        <td class="text-center"><code>9102</code></td>
+                    </tr>
+                    <tr>
+                        <td>Log Replication</td>
+                        <td class="text-center"><code>9200</code></td>
+                        <td class="text-center"><code>9201</code></td>
+                        <td class="text-center"><code>9202</code></td>
+                    </tr>
+                    <tr>
+                        <td>Snapshot Transfer</td>
+                        <td class="text-center"><code>9300</code></td>
+                        <td class="text-center"><code>9301</code></td>
+                        <td class="text-center"><code>9302</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                <strong>端口冲突注意：</strong>单机部署多节点时，上述所有端口均不得与其他服务冲突。
+                端口范围 <code>8010-8042</code>（Archive/Consensus）和 <code>9000-9302</code>（Cluster 通信）
+                需确保未被占用。
+            </div>
+
+            <h5>端口用途说明</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:240px">端口类型</th><th>协议</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Spring Boot HTTP</td><td>TCP</td><td>Spring Boot 内嵌 Tomcat 端口，通过 <code>-Dserver.port</code> 覆盖</td></tr>
+                    <tr><td>Archive Control</td><td>UDP (Aeron)</td><td>Archive 控制通道，用于录制/回放请求</td></tr>
+                    <tr><td>Archive Replication</td><td>UDP (Aeron)</td><td>Archive 跨节点复制录制数据</td></tr>
+                    <tr><td>Archive Recording Events</td><td>UDP (Aeron)</td><td>Archive 录制事件通知</td></tr>
+                    <tr><td>Consensus Replication</td><td>UDP (Aeron)</td><td>共识模块日志复制通道</td></tr>
+                    <tr><td>Client Facing (Ingress)</td><td>UDP (Aeron)</td><td>客户端连接入口，发送业务请求</td></tr>
+                    <tr><td>Member Facing</td><td>UDP (Aeron)</td><td>集群成员间内部通信（选举、心跳）</td></tr>
+                    <tr><td>Log Replication</td><td>UDP (Aeron)</td><td>Raft 日志复制，Leader → Follower</td></tr>
+                    <tr><td>Snapshot Transfer</td><td>UDP (Aeron)</td><td>快照数据传输（新节点加入或恢复时）</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <h2 id="cluster-role"><i class="bi bi-person-badge me-2"></i>集群角色管理</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <p>
+                Aeron Cluster 基于 Raft 协议，每个节点在运行时有三种角色。
+                <code>MatchEngineClusteredService</code> 通过保存 <code>Cluster</code> 引用和跟踪
+                <code>onRoleChange</code> 回调来管理角色状态。
+            </p>
+
+            <h5>Cluster.Role 枚举</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:140px">角色</th><th>Code</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>FOLLOWER</code></td><td>0</td><td>跟随者，复制 Leader 的日志，不处理客户端请求</td></tr>
+                    <tr><td><code>CANDIDATE</code></td><td>1</td><td>候选人，正在发起 Leader 选举</td></tr>
+                    <tr><td><code>LEADER</code></td><td>2</td><td>领导者，处理客户端请求，向 Follower 复制日志</td></tr>
+                </tbody>
+            </table>
+
+            <h5>角色生命周期</h5>
+            <div class="mermaid">
+flowchart LR
+    A["onStart(cluster)"] -->|保存引用<br>读取初始角色| B["FOLLOWER"]
+    B -->|发起选举| C["CANDIDATE"]
+    C -->|获得多数票| D["LEADER"]
+    C -->|选举超时| B
+    D -->|发现更高 term| B
+
+    style B fill:#6c757d,color:#fff,stroke:none
+    style C fill:#ffc107,stroke:none
+    style D fill:#198754,color:#fff,stroke:none
+            </div>
+
+            <h5>实现方式</h5>
+            <p><code>MatchEngineClusteredService</code> 中的关键设计：</p>
+<pre><code>@Service
+public class MatchEngineClusteredService implements ClusteredService {
+
+    @Resource
+    private AeronClusterConfiguration aeronClusterConfiguration;
+
+    // Cluster 引用，onStart 时保存，后续可查询 memberId/logPosition 等
+    private volatile Cluster cluster;
+
+    // 当前角色，volatile 保证多线程可见性
+    @Getter
+    private volatile Cluster.Role currentRole = Cluster.Role.FOLLOWER;
+
+    @Override
+    public void onStart(Cluster cluster, Image snapshotImage) {
+        this.cluster = cluster;
+        this.currentRole = cluster.role();
+        // 注意：onStart 阶段 cluster.memberId() 返回 -1（见 ISS-009）
+        log.info("onStart nodeId:{}, role:{}",
+            aeronClusterConfiguration.getNodeId(), currentRole);
+    }
+
+    @Override
+    public void onRoleChange(Cluster.Role newRole) {
+        Cluster.Role previousRole = this.currentRole;
+        this.currentRole = newRole;
+        log.info("onRoleChange memberId:{}, {} -> {}",
+            cluster.memberId(), previousRole, newRole);
+    }
+
+    public boolean isLeader() {
+        return currentRole == Cluster.Role.LEADER;
+    }
+}</code></pre>
+
+            <h5>其他 Spring Bean 获取角色</h5>
+<pre><code>@Resource
+MatchEngineClusteredService clusteredService;
+
+// 获取当前角色
+Cluster.Role role = clusteredService.getCurrentRole();
+
+// 判断是否 Leader
+boolean isLeader = clusteredService.isLeader();
+
+// 获取 Cluster 实例（onStart 后可用）
+int memberId = clusteredService.getCluster().memberId();</code></pre>
+
+            <h5>Cluster 接口常用方法</h5>
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr><th style="width:220px">方法</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>role()</code></td><td>当前节点角色（FOLLOWER / CANDIDATE / LEADER）</td></tr>
+                    <tr><td><code>memberId()</code></td><td>当前节点的集群成员 ID</td></tr>
+                    <tr><td><code>logPosition()</code></td><td>当前日志位置（字节偏移）</td></tr>
+                    <tr><td><code>time()</code></td><td>集群时间（所有节点一致）</td></tr>
+                    <tr><td><code>clientSessions()</code></td><td>所有已连接的客户端会话</td></tr>
+                    <tr><td><code>aeron()</code></td><td>底层 Aeron 客户端实例</td></tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                <strong>注意：</strong>在 <code>onStart</code>、<code>onRoleChange</code>、<code>onTakeSnapshot</code>、<code>onTerminate</code>
+                等生命周期方法中，<strong>不要</strong>发送消息或调度定时器。这些方法中仅适合读取状态和保存引用。
+            </div>
+        </div>
+    </div>
+
+    <h2 id="dep-rules"><i class="bi bi-shield-check me-2"></i>依赖管理原则</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <p>引入 <code>spring-boot-starter-parent</code> 后，以下原则可以避免大部分版本冲突问题：</p>
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr><th style="width:50px">#</th><th>原则</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><strong>Spring Boot 已托管的依赖不要手动指定版本</strong></td>
+                        <td>Logback、SLF4J、Jackson、Tomcat、JUnit 等由 parent POM 统一管理，手动指定版本会覆盖托管版本，容易产生不兼容</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><strong>非 Spring Boot 托管的依赖必须显式指定版本</strong></td>
+                        <td>Aeron、Agrona、gRPC、Protobuf、Vert.x 等不在 Spring Boot BOM 中，必须在 <code>&lt;properties&gt;</code> 中统一管理版本号</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><strong>使用 <code>mvn dependency:tree</code> 排查冲突</strong></td>
+                        <td>出现 <code>NoClassDefFoundError</code> 或 <code>ClassNotFoundException</code> 时，先用依赖树定位实际加载的版本</td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td><strong>覆盖父 POM 配置用 <code>combine.self="override"</code></strong></td>
+                        <td>不要用空字符串覆盖，应使用 Maven 标准的 POM 合并指令</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h5>Spring Boot 3.4.5 托管的常见依赖（部分）</h5>
+<pre><code>logback-classic     → 1.5.x     ← 不要手动指定
+slf4j-api           → 2.0.x     ← 不要手动指定
+jackson-databind    → 2.18.x    ← 不要手动指定
+junit-jupiter       → 5.11.x    ← 不要手动指定
+mockito-core        → 5.14.x    ← 不要手动指定
+tomcat-embed-core   → 10.1.x    ← 不要手动指定
+
+aeron-all           → (无托管)  ← 必须手动指定
+agrona              → (无托管)  ← 必须手动指定
+grpc-netty-shaded   → (无托管)  ← 必须手动指定
+protobuf-java       → (无托管)  ← 必须手动指定</code></pre>
+        </div>
+    </div>
+
+    <h2 id="changelog"><i class="bi bi-clock-history me-2"></i>变更记录</h2>
+    <table class="table table-bordered">
+        <thead class="table-light">
+            <tr><th style="width:120px">日期</th><th style="width:100px">问题编号</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>2026-03-11</td><td>ISS-001</td><td>记录 <code>--release</code> 与 <code>--add-exports</code> 冲突问题及修复方案</td></tr>
+            <tr><td>2026-03-11</td><td>ISS-002</td><td>记录空 <code>maven.compiler.release</code> 导致 NumberFormatException 及正确的覆盖方式</td></tr>
+            <tr><td>2026-03-11</td><td>ISS-003</td><td>记录 Logback 1.4.14 与 Spring Boot 3.4.5 不兼容问题</td></tr>
+            <tr><td>2026-03-11</td><td>ISS-004</td><td>批量清理 6 处依赖版本冲突（aeron 重复引入、SBE 版本不匹配、shade 插件冲突、托管依赖降级、Netty 降级、annotations-api 过时）</td></tr>
+            <tr><td>2026-03-11</td><td>ISS-005</td><td>从 <code>spring-boot-starter-parent</code> 继承改为 <code>spring-boot-dependencies</code> BOM 导入方式</td></tr>
+            <tr><td>2026-03-15</td><td>ISS-006</td><td>记录 <code>@Value</code> 与 <code>@ConfigurationProperties</code> 混用导致 TypeMismatchException 及正确的配置绑定方式</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-007</td><td>ClusterNodeBoot Code Review：修复端点格式、目录路径、Spring 启动阻塞、资源泄漏、目录创建共 5 处 Bug</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-008</td><td>cluster.sh 空数组展开导致 start 命令失效，同步修复 shebang 和 echo -e 的 Linux 兼容性问题</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-009</td><td>onStart() 中 cluster.memberId() 返回 -1，改用配置中的 nodeId，并记录 Aeron 生命周期回调中 memberId 可用性</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-010</td><td>ClusterEvent 心跳超时被 ErrorHandler 误报为 ERROR，改为按异常类型智能路由日志级别</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-011</td><td>Logback NODE_ID 变量名不匹配致多节点日志混写，同步修复 SizeAndTimeBasedFNATP 弃用警告和内部状态日志泄露</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-012</td><td>OrderBookTest 4 处 amendOrder 调用参数数量不匹配导致编译失败，同步修正测试断言</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-013</td><td>实现 SBE 命令分发机制：MessageHeader templateId 路由、Flyweight 复用、symbolCode 查表、PlaceOrderRequest → MatchOrder 转换</td></tr>
+            <tr><td>2026-03-16</td><td>ISS-014</td><td>抽取 laser-common 公共模块：迁移 common 包 + BigDecimalUtil + SBE 编译配置，engine 改为 jar 依赖，cluster.sh 联动编译</td></tr>
+        </tbody>
+    </table>
+
+    <hr>
+    <footer class="text-muted text-center py-3">
+        <small>Laser Matching Engine 开发问题记录 &nbsp;|&nbsp; 持续维护中</small>
+    </footer>
+</div>
+
+<!-- ==================== 回到顶部按钮 ==================== -->
+<a href="#top" class="btn btn-primary back-to-top" id="backToTop" title="回到顶部">
+    <i class="bi bi-arrow-up"></i>
+</a>
+
+<!-- ==================== JS ==================== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+</script>
+<script>
+    const backBtn = document.getElementById('backToTop');
+    window.addEventListener('scroll', () => {
+        backBtn.classList.toggle('show', window.scrollY > 300);
+    });
+
+    const sections = document.querySelectorAll('h2[id]');
+    const navLinks = document.querySelectorAll('.sidebar .nav-link');
+    window.addEventListener('scroll', () => {
+        let current = '';
+        sections.forEach(sec => {
+            if (window.scrollY >= sec.offsetTop - 80) current = sec.getAttribute('id');
+        });
+        navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+        });
+    });
+</script>
+</body>
+</html>
