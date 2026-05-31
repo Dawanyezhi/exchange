@@ -57,12 +57,12 @@ Bid:
 常见字段：
 
 ```text
-bestBidPrice
-bestBidQty
-bestAskPrice
-bestAskQty
-lastPrice
-lastQty
+bestBidPrice    买一价
+bestBidQty      买一数量，当前买一价位上的可见挂单总数量
+bestAskPrice    卖一价
+bestAskQty      卖一数量，当前卖一价位上的可见挂单总数量
+lastPrice       最新成交价
+lastQty         最新成交数量
 ```
 
 L1 能告诉你当前最优价，但看不到更深档位。
@@ -147,7 +147,7 @@ MBO 看到：
 
 ### 5.1 逐笔成交
 
-逐笔成交表示每一笔真实成交：
+逐笔成交表示每一笔真实成交，通常对应撮合引擎里一次 `maker order` 和 `taker order` 的成交事件。
 
 ```text
 tradeId
@@ -163,15 +163,40 @@ timestamp
 刚刚成交了什么？
 ```
 
+其中 `tradeId` 是一笔市场成交的唯一 ID，用于行情、成交查询、K 线聚合、清算和审计。
+
+例如：
+
+```text
+tradeId = 1001
+symbol = BTC-USDT
+price = 60000
+qty = 0.4 BTC
+makerOrderId = A
+takerOrderId = B
+```
+
+一张订单可能扫多档，因此可能产生多笔逐笔成交。
+
 ### 5.2 逐笔订单
 
-逐笔订单表示订单簿中每张订单的新增、修改、删除。
+逐笔订单表示订单簿中某一张可见挂单发生了什么变化。
+
+常见变化包括：
+
+```text
+Add Order      新增挂单
+Modify Order   修改挂单数量或价格
+Execute Order  挂单被成交扣减
+Delete Order   挂单被撤销或完全移除
+```
 
 例如：
 
 ```text
 Add Order A, BUY, 30000, 1 BTC
 Modify Order A, remaining = 0.5 BTC
+Execute Order A, executed = 0.3 BTC, remaining = 0.2 BTC
 Delete Order A
 ```
 
@@ -182,6 +207,36 @@ Delete Order A
 ```
 
 MBO 更接近逐笔订单级行情。
+
+撮合会同时影响这两类数据。
+
+例如订单簿里有：
+
+```text
+Ask:
+order A  price=60000  qty=1 BTC
+```
+
+市价买单成交 `0.4 BTC` 时，行情系统可以同时发布：
+
+```text
+逐笔成交:
+  tradeId = 1001
+  price = 60000
+  qty = 0.4 BTC
+
+逐笔订单:
+  order = A
+  action = EXECUTE
+  remainingQty = 0.6 BTC
+```
+
+所以：
+
+```text
+逐笔成交回答：刚刚成交了什么？
+逐笔订单回答：订单簿里的哪张订单发生了什么变化？
+```
 
 ## 6. 为什么逐笔订单可以重建盘口
 
@@ -268,6 +323,8 @@ MBO 价值高，但代价也高。
 - L2 depth
 - trade feed
 - full channel / MBO-like feed
+- MBO-like 订单级别变化
+- full channel 尽可能完整地推送订单簿变化,订单新增、修改、成交扣减等
 
 不同用户根据能力和需求选择不同行情。
 

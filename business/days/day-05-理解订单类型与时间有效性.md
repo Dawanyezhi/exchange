@@ -92,6 +92,98 @@ Post-only 控制流动性角色：
 - 可能产生滑点
 - 可能因价格保护、余额不足或流动性不足而部分成交后取消
 
+#### 3.2.1 市价单残渣处理
+
+市价单更容易出现“残渣”问题，尤其是按 quote 金额下买入市价单。
+
+例如：
+
+```text
+BUY BTC by quote amount
+预算 = 100 USDT
+```
+
+撮合引擎会按当前卖盘逐档计算实际可买 base 数量：
+
+```text
+remainingQuote = 用户预算
+
+while remainingQuote 还能买到满足交易规则的 base:
+    ask = 当前最优卖单
+    affordableBase = floorToLot(remainingQuote / ask.price)
+    tradeBase = min(affordableBase, ask.remainingBase)
+    tradeQuote = tradeBase * ask.price
+
+    生成成交:
+      baseQty = tradeBase
+      quoteQty = tradeQuote
+
+    remainingQuote -= tradeQuote
+```
+
+这里的关键不是 `remainingQuote > 0` 就一定能继续成交，而是剩余 quote 折算成 base 后，必须同时满足交易对规则：
+
+| 规则 | 含义 |
+| --- | --- |
+| `lotSize` | base 数量步长，例如 BTC 数量必须按 `0.00001` 递增 |
+| `minQty` | 最小 base 成交数量，例如单笔至少成交 `0.0001 BTC` |
+| `minNotional` | 最小名义金额，通常要求 `price * baseQty >= 5 USDT` |
+
+如果剩余预算只能买到极小 base，按 `lotSize` 向下取整后小于 `minQty`，或者成交金额小于 `minNotional`，则不能继续撮合。
+
+示例：
+
+```text
+remainingQuote = 0.8 USDT
+bestAsk = 60000 USDT
+lotSize = 0.00001 BTC
+minQty = 0.00001 BTC
+minNotional = 5 USDT
+
+affordableBase = floorToLot(0.8 / 60000)
+               = 0.00001 BTC
+
+notional = 0.00001 * 60000
+         = 0.6 USDT
+```
+
+虽然这个数量满足 `lotSize`，但名义金额 `0.6 USDT` 小于 `minNotional = 5 USDT`，所以不能继续成交。此时 `0.8 USDT` 就是未使用预算残渣。
+
+生产系统里，撮合引擎应输出实际成交事实：
+
+```text
+fillBaseQty
+fillQuoteQty
+accExecutedBaseQty 累积成交 base 数量
+accExecutedQuoteQty 累积成交 quote 数量
+remainingQuote
+terminalReason = RESIDUAL_BUDGET_BELOW_MIN_TRADE
+```
+
+余额处理不应由撮合直接完成。撮合结束后，清算模块根据成交事件、冻结记录和手续费规则计算实际扣款，并通知账户模块释放未使用预算：
+
+```text
+冻结 quote = 100 USDT
+实际成交消耗 quote = 99.18 USDT
+手续费 = 0.05 USDT
+剩余未使用预算 = 0.77 USDT
+
+Account:
+  扣减实际成交金额和手续费
+  释放未使用 quote 到 available
+```
+
+订单最终状态取决于是否有成交：
+
+| 场景 | 建议订单终态 | 结束原因 |
+| --- | --- | --- |
+| 已部分成交，剩余预算太小 | `PARTIALLY_FILLED` 后结束 | `RESIDUAL_BUDGET_BELOW_MIN_TRADE` |
+| 一笔都没成交，预算太小 | `CANCELED` / `EXPIRED` | `BUDGET_BELOW_MIN_TRADE` |
+| 一笔都没成交，无对手盘 | `CANCELED` / `EXPIRED` | `NO_LIQUIDITY` |
+| 因价格保护停止 | `PARTIALLY_FILLED` 或 `CANCELED` | `PROTECTION_LIMIT` |
+
+这里不要把残渣结束标记为 `REJECTED`。订单本身已经合法进入撮合，只是剩余预算无法满足最小成交规则，属于执行结束后的剩余取消和资金释放问题。
+
 ### 3.3 Post-only Order
 
 Post-only 保证订单只作为 maker。

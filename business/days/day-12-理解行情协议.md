@@ -95,6 +95,16 @@ ITCH 是行情分发协议。
 | 性能目标 | 低延迟接收交易指令 | 高吞吐分发市场变化 |
 | 恢复重点 | 会话序号和订单回报补齐 | 行情序号、快照和增量恢复 |
 
+order reference 订单引用号，行情协议里用于标识某一张订单的 ID
+
+price 价格
+
+shares 数量
+
+stock 交易标的
+
+event type 行情事件类型，例如新增订单、订单成交、订单取消、交易开始、交易暂停、市场关闭等
+
 一句话：
 
 ```text
@@ -148,27 +158,29 @@ seq=102: delete
 - 最优价错误
 - 策略基于错误行情下单
 
-所以行情协议必须提供连续序号，让客户端发现缺口。
+所以行情协议必须提供连续序号，让客户端发现缺口。行情协议的连续序号最好按 symbol/channel 生成
 
 ## 7. 行情和撮合的关系
 
 撮合引擎产生原始事件：
 
 ```text
-OrderAccepted
+OrderAccepted 订单已被系统接受
 OrderMatched
 OrderCanceled
-BookUpdated
+BookUpdated 订单簿发生变化
 ```
 
 行情引擎消费这些事件后，生成适合外部分发的行情：
 
 ```text
-Trade Feed
-Depth Feed
-Ticker
+Trade Feed  逐笔成交流
+Depth Feed  深度行情 / 盘口流 
+Ticker      市场摘要
 K Line
-Index / Mark Price
+Index / Mark Price  
+    Index Price 指数价格。通常由多个外部现货市场价格加权计算
+    Mark Price 标记价格。合约系统用来计算未实现盈亏和强平风险，通常基于index price、资金费率、合理基差、盘口保护
 ```
 
 生产系统里通常不建议让撮合直接负责所有行情格式。

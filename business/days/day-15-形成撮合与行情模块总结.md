@@ -87,6 +87,7 @@ flowchart LR
     DepthFeed --> MarketClient
     Ticker --> MarketClient
 ```
+![img.png](assets/撮合与行情闭环图.png)
 
 ## 5. 撮合引擎和行情引擎共享的核心概念
 
