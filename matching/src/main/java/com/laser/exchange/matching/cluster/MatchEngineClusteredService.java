@@ -88,7 +88,6 @@ public class MatchEngineClusteredService implements ClusteredService {
                         matchEngine.getMatchEngineState(),
                         serialNumValidator,
                         eventsHelper,
-                        resultLogWriter,
                         reader
                 );
                 log.info("[onStart] snapshot loaded: maxReq={}, maxRes={}, entries={}",
@@ -129,6 +128,15 @@ public class MatchEngineClusteredService implements ClusteredService {
         long maxRes = eventsHelper.getNextResultSerialNum() - 1;
         log.info("onTakeSnapshot begin, takenAt={}, maxReq={}, maxRes={}", takenAt, maxReq, maxRes);
         try {
+            long lastOfferedResultSerialNum = resultLogWriter.getLastOfferedResultSerialNum();
+            if (lastOfferedResultSerialNum > 0L && maxRes != lastOfferedResultSerialNum) {
+                throw new IllegalStateException("snapshot result boundary mismatch: maxRes="
+                        + maxRes + ", lastOfferedResultSerialNum=" + lastOfferedResultSerialNum);
+            }
+            if (lastOfferedResultSerialNum > 0L) {
+                resultLogWriter.awaitLastOfferedRecorded();
+            }
+
             AeronPublicationSnapshotWriter writer = new AeronPublicationSnapshotWriter(snapshotPublication);
             int entryCount = snapshotManager.takeSnapshot(
                     matchEngine.getMatchEngineState(),

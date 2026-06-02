@@ -6,14 +6,12 @@ import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.OrderType;
 import com.laser.exchange.common.enums.StpStrategyEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
-import com.laser.exchange.common.result.MatchResult;
 import com.laser.exchange.matching.core.model.MatchConfig;
 import com.laser.exchange.matching.core.model.MatchContext;
 import com.laser.exchange.matching.core.model.MatchEngineState;
 import com.laser.exchange.matching.core.model.MatchOrder;
 import com.laser.exchange.matching.core.model.OrderBook;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
-import com.laser.exchange.matching.resultLog.ResultLogWriter;
 import com.laser.exchange.matching.validation.SerialNumValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,7 +19,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.TreeMap;
 
@@ -35,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>codec 往返 (header/symbolConfig/orderBook+orders/serialNum/footer)</li>
  *   <li>OrderBook 完整状态恢复</li>
  *   <li><b>快照前后 OrderBook bit-for-bit 一致 (用户要求)</b></li>
- *   <li>serialNum reconcile：snapshot vs archive 取较大者</li>
+ *   <li>serialNum 恢复：只使用 snapshot.maxResultSerialNum 作为恢复边界</li>
  *   <li>多 symbol</li>
  * </ul>
  */
@@ -113,9 +110,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(0L);
-
-        SnapshotManager.LoadResult r = manager.loadSnapshot(restored, val, helper, repo, buffer);
+        SnapshotManager.LoadResult r = manager.loadSnapshot(restored, val, helper, buffer);
         assertEquals(0L, r.maxProcessedRequestSerialNum);
         assertEquals(0L, r.maxResultSerialNum);
     }
@@ -131,9 +126,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(0L);
-
-        manager.loadSnapshot(restored, val, helper, repo, buffer);
+        manager.loadSnapshot(restored, val, helper, buffer);
 
         // SymbolConfig 一致
         SymbolConfig cfgR = restored.getMatchContext().getSymbolConfigMap().get(1);
@@ -187,7 +180,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
+                new MatchResultEventsHelper(), buffer);
 
         OrderBook restoredBook = restored.getMatchContext().getOrderBook("BTC_USDT");
         assertNotNull(restoredBook);
@@ -212,8 +205,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(0L);
-        manager.loadSnapshot(restored, val, helper, repo, buffer);
+        manager.loadSnapshot(restored, val, helper, buffer);
 
         // 4. 拍快照恢复后状态指纹
         OrderBook bookAfter = restored.getMatchContext().getOrderBook("BTC_USDT");
@@ -266,54 +258,19 @@ class SnapshotManagerTest {
     }
 
     @Test
-    @DisplayName("serialNum reconcile - 场景 A: archive 大于 snapshot")
-    void serialNumReconcile_archiveGreater() {
-        setupOneSymbolWithBook();
-        manager.takeSnapshot(state, 50L, 100L, 1700000000000L, buffer);
-
-        // 模拟 result log 已经持久化到 200 (大于 snapshot 的 100)
-        MatchEngineState restored = new MatchEngineState();
-        SerialNumValidator val = new SerialNumValidator(true);
-        MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(200L);
-
-        manager.loadSnapshot(restored, val, helper, repo, buffer);
-        assertEquals(201L, helper.getNextResultSerialNum(),
-                "result log 中 200 > snapshot 中 100 → 起点应取 result log max + 1");
-        assertEquals(50L, val.getLastSerialNum());
-    }
-
-    @Test
-    @DisplayName("serialNum reconcile - 场景 B: snapshot 大于 archive")
-    void serialNumReconcile_snapshotGreater() {
+    @DisplayName("恢复 resultSerialNum 起点只使用快照边界")
+    void serialNumRestoreUsesSnapshotBoundary() {
         setupOneSymbolWithBook();
         manager.takeSnapshot(state, 50L, 500L, 1700000000000L, buffer);
 
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(0L);
-        // result log 仍为空
-        manager.loadSnapshot(restored, val, helper, repo, buffer);
+        manager.loadSnapshot(restored, val, helper, buffer);
 
         assertEquals(501L, helper.getNextResultSerialNum(),
-                "snapshot 500 > archive 0 → 起点应取 snapshot max + 1");
-    }
-
-    @Test
-    @DisplayName("serialNum reconcile - 场景 C: snapshot 与 archive 相等")
-    void serialNumReconcile_equal() {
-        setupOneSymbolWithBook();
-        manager.takeSnapshot(state, 50L, 100L, 1700000000000L, buffer);
-
-        MatchEngineState restored = new MatchEngineState();
-        SerialNumValidator val = new SerialNumValidator(true);
-        MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        ResultLogWriter repo = fakeResultLogWriter(100L);
-
-        manager.loadSnapshot(restored, val, helper, repo, buffer);
-        assertEquals(101L, helper.getNextResultSerialNum(),
-                "等价场景：取较大值 100 + 1");
+                "恢复起点应取 snapshot.maxResultSerialNum + 1");
+        assertEquals(50L, val.getLastSerialNum());
     }
 
     @Test
@@ -341,7 +298,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
+                new MatchResultEventsHelper(), buffer);
 
         assertEquals(2, restored.getMatchContext().getSymbolConfigMap().size());
         assertEquals(2, restored.getMatchContext().getOrderBookMap().size());
@@ -369,7 +326,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
+                new MatchResultEventsHelper(), buffer);
 
         OrderBook bookR = restored.getMatchContext().getOrderBook("BTC_USDT");
         var depth = bookR.getBuyOrders().get(new BigDecimal("100"));
@@ -395,7 +352,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> manager.loadSnapshot(restored, new SerialNumValidator(true),
-                        new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer));
+                        new MatchResultEventsHelper(), buffer));
         assertTrue(ex.getMessage().contains("snapshot checksum mismatch"));
     }
 
@@ -411,26 +368,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> manager.loadSnapshot(restored, new SerialNumValidator(true),
-                        new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer));
+                        new MatchResultEventsHelper(), buffer));
         assertTrue(ex.getMessage().contains("snapshot entry count mismatch"));
-    }
-
-    private ResultLogWriter fakeResultLogWriter(long committedResultSerialNum) {
-        return new ResultLogWriter() {
-            @Override
-            public void append(List<MatchResult> results) {
-                // no-op
-            }
-
-            @Override
-            public long getCommittedResultSerialNum() {
-                return committedResultSerialNum;
-            }
-
-            @Override
-            public void close() {
-                // no-op
-            }
-        };
     }
 }

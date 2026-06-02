@@ -20,9 +20,14 @@ public interface ResultLogWriter {
     void append(List<MatchResult> results);
 
     /**
-     * 当前 writer 已成功追加的最大 resultSerialNum。0 表示尚无结果。
+     * 当前 writer 已 offer 到 Archive publication 的最大 resultSerialNum。0 表示尚无结果。
      */
-    long getCommittedResultSerialNum();
+    long getLastOfferedResultSerialNum();
+
+    /**
+     * 等待当前已 offer 的最大 result 被 Archive recording 覆盖。
+     */
+    void awaitLastOfferedRecorded();
 
     /**
      * 关闭结果日志写入资源。

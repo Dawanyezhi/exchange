@@ -7,12 +7,14 @@ import io.aeron.ExclusivePublication;
 import io.aeron.Publication;
 import io.aeron.archive.client.AeronArchive;
 import io.aeron.archive.codecs.SourceLocation;
+import io.aeron.archive.status.RecordingPos;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.CloseHelper;
 import org.agrona.ExpandableArrayBuffer;
 import org.agrona.MutableDirectBuffer;
+import org.agrona.concurrent.status.CountersReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -44,12 +46,25 @@ public class ArchiveResultLogWriter implements ResultLogWriter {
     @Value("${laser.matching.result-log.stream-id:" + DEFAULT_RESULT_STREAM_ID + "}")
     private int streamId;
 
+    @Value("${laser.matching.result-log.commit-timeout-ms:3000}")
+    private long commitTimeoutMs;
+
     private final MutableDirectBuffer encodeBuffer = new ExpandableArrayBuffer(1024);
 
     private AeronArchive aeronArchive;
+
     private ExclusivePublication publication;
-    private long committedResultSerialNum = 0L;
+
+    private CountersReader countersReader;
+
+    private long recordingId = RecordingPos.NULL_RECORDING_ID;
+
+    private long lastOfferedResultSerialNum = 0L;
+
+    private long lastOfferedPosition = 0L;
+
     private volatile boolean initialized = false;
+
 
     /**
      * 由 ClusteredService.onStart 在 Cluster/Archive 启动完成后调用。
@@ -75,12 +90,14 @@ public class ArchiveResultLogWriter implements ResultLogWriter {
 
             aeronArchive = AeronArchive.connect(ctx);
             publication = aeron.addExclusivePublication(channel, streamId);
+            countersReader = aeron.countersReader();
 
             long recordingSubscriptionId = aeronArchive.startRecording(channel, streamId, SourceLocation.LOCAL);
+            recordingId = awaitRecordingId(publication.sessionId(), recordingSubscriptionId);
 
             initialized = true;
-            log.info("[ArchiveResultLogWriter] initialized channel={}, streamId={}, archiveControl={}, recordingSubscriptionId={}",
-                    channel, streamId, archiveControlChannel, recordingSubscriptionId);
+            log.info("[ArchiveResultLogWriter] initialized channel={}, streamId={}, archiveControl={}, sessionId={}, recordingId={}, recordingSubscriptionId={}",
+                    channel, streamId, archiveControlChannel, publication.sessionId(), recordingId, recordingSubscriptionId);
         } catch (Exception e) {
             CloseHelper.quietClose(publication);
             CloseHelper.quietClose(aeronArchive);
@@ -96,18 +113,21 @@ public class ArchiveResultLogWriter implements ResultLogWriter {
             return;
         }
         for (MatchResult r : results) {
-            if (r.getResultSerialNum() <= committedResultSerialNum) {
+            if (r.getResultSerialNum() <= lastOfferedResultSerialNum) {
                 throw new IllegalStateException("resultSerialNum out of order: incoming="
-                        + r.getResultSerialNum() + ", committed=" + committedResultSerialNum);
+                        + r.getResultSerialNum() + ", lastOffered=" + lastOfferedResultSerialNum);
             }
 
             int length = r.encode(encodeBuffer, 0);
-            offerWithBackpressure(encodeBuffer, length, r.getResultSerialNum());
-            committedResultSerialNum = r.getResultSerialNum();
+
+            // 背压重试方式offer
+            long offeredPosition = offerWithBackpressure(encodeBuffer, length, r.getResultSerialNum());
+            lastOfferedPosition = offeredPosition;
+            lastOfferedResultSerialNum = r.getResultSerialNum();
         }
     }
 
-    private void offerWithBackpressure(MutableDirectBuffer buffer, int length, long resultSerialNum) {
+    private long offerWithBackpressure(MutableDirectBuffer buffer, int length, long resultSerialNum) {
         long result;
         int spins = 0;
 
@@ -127,20 +147,70 @@ public class ArchiveResultLogWriter implements ResultLogWriter {
                 Thread.onSpinWait();
             }
         }
+        return result;
+    }
+
+    private long awaitRecordingId(int sessionId, long recordingSubscriptionId) {
+        long deadlineNs = System.nanoTime() + commitTimeoutMs * 1_000_000L;
+        int counterId;
+        while ((counterId = RecordingPos.findCounterIdBySession(countersReader, sessionId)) == CountersReader.NULL_COUNTER_ID) {
+            if (System.nanoTime() >= deadlineNs) {
+                throw new IllegalStateException("archive recording counter not found, sessionId="
+                        + sessionId + ", recordingSubscriptionId=" + recordingSubscriptionId);
+            }
+            Thread.onSpinWait();
+        }
+
+        long id = RecordingPos.getRecordingId(countersReader, counterId);
+        if (id == RecordingPos.NULL_RECORDING_ID) {
+            throw new IllegalStateException("archive recordingId is null, sessionId="
+                    + sessionId + ", counterId=" + counterId);
+        }
+        return id;
+    }
+
+    private void awaitRecordingPosition(long offeredPosition, long resultSerialNum) {
+        long deadlineNs = System.nanoTime() + commitTimeoutMs * 1_000_000L;
+        long recordingPosition;
+        while ((recordingPosition = aeronArchive.getRecordingPosition(recordingId)) < offeredPosition) {
+            if (recordingPosition == AeronArchive.NULL_POSITION) {
+                throw new IllegalStateException("archive recording is not active, recordingId="
+                        + recordingId + ", resultSerialNum=" + resultSerialNum);
+            }
+            if (System.nanoTime() >= deadlineNs) {
+                throw new IllegalStateException("archive recording position did not catch up, recordingId="
+                        + recordingId + ", resultSerialNum=" + resultSerialNum
+                        + ", offeredPosition=" + offeredPosition
+                        + ", recordingPosition=" + recordingPosition
+                        + ", timeoutMs=" + commitTimeoutMs);
+            }
+            Thread.onSpinWait();
+        }
     }
 
     @Override
-    public long getCommittedResultSerialNum() {
-        return committedResultSerialNum;
+    public long getLastOfferedResultSerialNum() {
+        return lastOfferedResultSerialNum;
+    }
+
+    public long getLastOfferedPosition() {
+        return lastOfferedPosition;
+    }
+
+    public long getRecordingId() {
+        return recordingId;
     }
 
     /**
-     * 快照恢复时使用：覆写当前已提交的最大序号。
+     * 快照前使用：等待当前已 offer 的最大 result 被 Archive recording 覆盖。
      */
-    public void restoreCommittedResultSerialNum(long committedResultSerialNum) {
-        log.info("[ArchiveResultLogWriter] restore committedResultSerialNum from {} to {}",
-                this.committedResultSerialNum, committedResultSerialNum);
-        this.committedResultSerialNum = committedResultSerialNum;
+    @Override
+    public void awaitLastOfferedRecorded() {
+        ensureInitialized();
+        if (lastOfferedPosition <= 0L) {
+            return;
+        }
+        awaitRecordingPosition(lastOfferedPosition, lastOfferedResultSerialNum);
     }
 
     private void ensureInitialized() {
@@ -155,7 +225,8 @@ public class ArchiveResultLogWriter implements ResultLogWriter {
         CloseHelper.quietClose(publication);
         CloseHelper.quietClose(aeronArchive);
         initialized = false;
-        log.info("[ArchiveResultLogWriter] closed channel={}, streamId={}, committedResultSerialNum={}",
-                channel, streamId, committedResultSerialNum);
+        recordingId = RecordingPos.NULL_RECORDING_ID;
+        log.info("[ArchiveResultLogWriter] closed channel={}, streamId={}, lastOfferedResultSerialNum={}, lastOfferedPosition={}",
+                channel, streamId, lastOfferedResultSerialNum, lastOfferedPosition);
     }
 }
