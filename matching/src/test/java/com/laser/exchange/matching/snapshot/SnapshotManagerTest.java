@@ -6,13 +6,14 @@ import com.laser.exchange.common.enums.OrderStatusEnum;
 import com.laser.exchange.common.enums.OrderType;
 import com.laser.exchange.common.enums.StpStrategyEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
+import com.laser.exchange.common.result.MatchResult;
 import com.laser.exchange.matching.core.model.MatchConfig;
 import com.laser.exchange.matching.core.model.MatchContext;
 import com.laser.exchange.matching.core.model.MatchEngineState;
 import com.laser.exchange.matching.core.model.MatchOrder;
 import com.laser.exchange.matching.core.model.OrderBook;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
-import com.laser.exchange.matching.resultRepoModule.InMemoryResultRepository;
+import com.laser.exchange.matching.resultLog.ResultLogWriter;
 import com.laser.exchange.matching.validation.SerialNumValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -112,7 +113,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository();
+        ResultLogWriter repo = fakeResultLogWriter(0L);
 
         SnapshotManager.LoadResult r = manager.loadSnapshot(restored, val, helper, repo, buffer);
         assertEquals(0L, r.maxProcessedRequestSerialNum);
@@ -130,7 +131,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository();
+        ResultLogWriter repo = fakeResultLogWriter(0L);
 
         manager.loadSnapshot(restored, val, helper, repo, buffer);
 
@@ -186,7 +187,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer);
+                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
 
         OrderBook restoredBook = restored.getMatchContext().getOrderBook("BTC_USDT");
         assertNotNull(restoredBook);
@@ -211,7 +212,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository();
+        ResultLogWriter repo = fakeResultLogWriter(0L);
         manager.loadSnapshot(restored, val, helper, repo, buffer);
 
         // 4. 拍快照恢复后状态指纹
@@ -270,17 +271,15 @@ class SnapshotManagerTest {
         setupOneSymbolWithBook();
         manager.takeSnapshot(state, 50L, 100L, 1700000000000L, buffer);
 
-        // 模拟 archive 已经持久化到 200 (大于 snapshot 的 100)
+        // 模拟 result log 已经持久化到 200 (大于 snapshot 的 100)
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository() {
-            @Override public long getMaxResultSerialNum() { return 200L; }
-        };
+        ResultLogWriter repo = fakeResultLogWriter(200L);
 
         manager.loadSnapshot(restored, val, helper, repo, buffer);
         assertEquals(201L, helper.getNextResultSerialNum(),
-                "archive 中 200 > snapshot 中 100 → 起点应取 archive max + 1");
+                "result log 中 200 > snapshot 中 100 → 起点应取 result log max + 1");
         assertEquals(50L, val.getLastSerialNum());
     }
 
@@ -293,8 +292,8 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository();
-        // archive 仍为空
+        ResultLogWriter repo = fakeResultLogWriter(0L);
+        // result log 仍为空
         manager.loadSnapshot(restored, val, helper, repo, buffer);
 
         assertEquals(501L, helper.getNextResultSerialNum(),
@@ -310,9 +309,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         SerialNumValidator val = new SerialNumValidator(true);
         MatchResultEventsHelper helper = new MatchResultEventsHelper();
-        InMemoryResultRepository repo = new InMemoryResultRepository() {
-            @Override public long getMaxResultSerialNum() { return 100L; }
-        };
+        ResultLogWriter repo = fakeResultLogWriter(100L);
 
         manager.loadSnapshot(restored, val, helper, repo, buffer);
         assertEquals(101L, helper.getNextResultSerialNum(),
@@ -344,7 +341,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer);
+                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
 
         assertEquals(2, restored.getMatchContext().getSymbolConfigMap().size());
         assertEquals(2, restored.getMatchContext().getOrderBookMap().size());
@@ -372,7 +369,7 @@ class SnapshotManagerTest {
 
         MatchEngineState restored = new MatchEngineState();
         manager.loadSnapshot(restored, new SerialNumValidator(true),
-                new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer);
+                new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer);
 
         OrderBook bookR = restored.getMatchContext().getOrderBook("BTC_USDT");
         var depth = bookR.getBuyOrders().get(new BigDecimal("100"));
@@ -398,7 +395,7 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> manager.loadSnapshot(restored, new SerialNumValidator(true),
-                        new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer));
+                        new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer));
         assertTrue(ex.getMessage().contains("snapshot checksum mismatch"));
     }
 
@@ -414,7 +411,26 @@ class SnapshotManagerTest {
         MatchEngineState restored = new MatchEngineState();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> manager.loadSnapshot(restored, new SerialNumValidator(true),
-                        new MatchResultEventsHelper(), new InMemoryResultRepository(), buffer));
+                        new MatchResultEventsHelper(), fakeResultLogWriter(0L), buffer));
         assertTrue(ex.getMessage().contains("snapshot entry count mismatch"));
+    }
+
+    private ResultLogWriter fakeResultLogWriter(long committedResultSerialNum) {
+        return new ResultLogWriter() {
+            @Override
+            public void append(List<MatchResult> results) {
+                // no-op
+            }
+
+            @Override
+            public long getCommittedResultSerialNum() {
+                return committedResultSerialNum;
+            }
+
+            @Override
+            public void close() {
+                // no-op
+            }
+        };
     }
 }

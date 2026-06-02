@@ -19,7 +19,7 @@ import java.util.List;
  *   helper.beginRequest(req.getSerialNum(), cluster.time());   // 入口
  *     ... 业务逻辑调用 helper.appendXxx(...) 多次
  *   List&lt;MatchResult&gt; batch = helper.endRequest();              // 出口
- *   resultRepository.persist(batch);
+ *   resultLogWriter.append(batch);
  * </pre>
  *
  * <p><b>确定性约束</b>：

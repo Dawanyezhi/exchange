@@ -3,8 +3,7 @@ package com.laser.exchange.matching.cluster;
 import com.laser.exchange.matching.config.AeronClusterConfiguration;
 import com.laser.exchange.matching.core.engine.MatchEngine;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
-import com.laser.exchange.matching.result.ResultMdcBroadcasterHolder;
-import com.laser.exchange.matching.resultRepoModule.ResultRepository;
+import com.laser.exchange.matching.resultLog.ArchiveResultLogWriter;
 import com.laser.exchange.matching.snapshot.AeronImageSnapshotReader;
 import com.laser.exchange.matching.snapshot.AeronPublicationSnapshotWriter;
 import com.laser.exchange.matching.snapshot.SnapshotManager;
@@ -55,10 +54,7 @@ public class MatchEngineClusteredService implements ClusteredService {
     private MatchResultEventsHelper eventsHelper;
 
     @Resource
-    private ResultRepository resultRepository;
-
-    @Resource
-    private ResultMdcBroadcasterHolder broadcasterHolder;
+    private ArchiveResultLogWriter resultLogWriter;
 
     @Resource
     private ClusterRoleHolder roleHolder;
@@ -78,8 +74,9 @@ public class MatchEngineClusteredService implements ClusteredService {
         log.info("onStart nodeId:{}, role:{}", aeronClusterConfiguration.getNodeId(), currentRole);
         writeRoleFile(currentRole);
 
-        // 初始化 MDC 广播器（复用 cluster 内置 Aeron client）
-        broadcasterHolder.init(cluster.aeron());
+        // 初始化结果持久化组件
+        resultLogWriter.init(cluster.aeron());
+
         snapshotManager = new SnapshotManager(matchEngine.getDefaultMarketOrderProtectionBps());
 
         // 如果 raftlog 包含快照，先恢复
@@ -91,7 +88,7 @@ public class MatchEngineClusteredService implements ClusteredService {
                         matchEngine.getMatchEngineState(),
                         serialNumValidator,
                         eventsHelper,
-                        resultRepository,
+                        resultLogWriter,
                         reader
                 );
                 log.info("[onStart] snapshot loaded: maxReq={}, maxRes={}, entries={}",

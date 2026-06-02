@@ -33,7 +33,7 @@ import com.laser.exchange.matching.core.model.MatchEngineState;
 import com.laser.exchange.matching.core.model.MatchOrder;
 import com.laser.exchange.matching.core.model.OrderBook;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
-import com.laser.exchange.matching.resultRepoModule.ResultRepository;
+import com.laser.exchange.matching.resultLog.ResultLogWriter;
 import com.laser.exchange.common.utils.BigDecimalUtil;
 import com.laser.exchange.matching.config.MarketOrderConfig;
 import com.laser.exchange.matching.validation.SerialNumValidator;
@@ -70,7 +70,7 @@ import java.util.zip.CRC32C;
  *   <li>SymbolConfig → 填入 MatchContext.symbolConfigMap + 对应 MatchConfig</li>
  *   <li>OrderBookStart + MatchOrderEntry 按原顺序 {@code orderBook.addOrder(...)}，保证深度按价格+时间还原</li>
  *   <li>SerialNumValidator.lastSerialNum = header.maxProcessedRequestSerialNum</li>
- *   <li>EventsHelper.nextResultSerialNum = max(header.maxResultSerialNum, resultRepository.getMaxResultSerialNum) + 1</li>
+ *   <li>EventsHelper.nextResultSerialNum = max(header.maxResultSerialNum, resultLogWriter.getCommittedResultSerialNum) + 1</li>
  * </ol>
  */
 @Slf4j
@@ -288,7 +288,7 @@ public class SnapshotManager {
     public LoadResult loadSnapshot(MatchEngineState state,
                                    SerialNumValidator validator,
                                    MatchResultEventsHelper eventsHelper,
-                                   ResultRepository resultRepository,
+                                   ResultLogWriter resultLogWriter,
                                    SnapshotReader reader) {
         LoadResult res = new LoadResult();
         Map<Integer, String> codeToSymbol = new HashMap<>();
@@ -388,13 +388,13 @@ public class SnapshotManager {
         // 恢复 serialNum 状态
         validator.restoreLastSerialNum(res.maxProcessedRequestSerialNum);
 
-        // 比较 archive 中的最大值，取较大者作为 result 下一个起点
-        long repoMax = resultRepository != null ? resultRepository.getMaxResultSerialNum() : 0L;
-        long reconciledMax = Math.max(res.maxResultSerialNum, repoMax);
+        // 比较 result log 中的最大值，取较大者作为 result 下一个起点
+        long committedMax = resultLogWriter != null ? resultLogWriter.getCommittedResultSerialNum() : 0L;
+        long reconciledMax = Math.max(res.maxResultSerialNum, committedMax);
         eventsHelper.restoreNextResultSerialNum(reconciledMax + 1);
 
-        log.info("[SnapshotManager] loadSnapshot done, entries={}, maxReq={}, maxRes(snap)={}, maxRes(repo)={}, nextRes={}",
-                res.entryCount, res.maxProcessedRequestSerialNum, res.maxResultSerialNum, repoMax, reconciledMax + 1);
+        log.info("[SnapshotManager] loadSnapshot done, entries={}, maxReq={}, maxRes(snap)={}, maxRes(log)={}, nextRes={}",
+                res.entryCount, res.maxProcessedRequestSerialNum, res.maxResultSerialNum, committedMax, reconciledMax + 1);
         return res;
     }
 

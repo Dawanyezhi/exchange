@@ -10,9 +10,7 @@ import com.laser.exchange.matching.core.model.MatchContext;
 import com.laser.exchange.matching.core.model.MatchOrder;
 import com.laser.exchange.matching.core.service.SymbolService;
 import com.laser.exchange.matching.result.MatchResultEventsHelper;
-import com.laser.exchange.matching.result.ResultMdcBroadcaster;
-import com.laser.exchange.matching.result.ResultMdcBroadcasterHolder;
-import com.laser.exchange.matching.resultRepoModule.ResultRepository;
+import com.laser.exchange.matching.resultLog.ResultLogWriter;
 import com.laser.exchange.matching.validation.SerialNumValidator;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -34,10 +32,11 @@ import static com.laser.exchange.matching.enums.CmdType.*;
  *   3. eventsHelper.beginRequest(serialNum, clusterTimestamp)
  *   4. 调用 MatchEngine 业务方法（engine 内部按需 append 事件）
  *   5. eventsHelper.endRequest() → 返回本次 result 列表
- *   6. resultRepository.persist(results)
+ *   6. resultLogWriter.append(results)
  * </pre>
  *
  * <p>所有时间戳均来自 aeron cluster 共识时钟，保证状态机确定性。
+ * 下游实时推送和 replay 由独立 result-publisher 服务从 Archive 读取。
  */
 @Slf4j
 @Component
@@ -56,14 +55,7 @@ public class CommandDispatcher {
     private MatchResultEventsHelper eventsHelper;
 
     @Resource
-    private ResultRepository resultRepository;
-
-    @Resource
-    private ResultMdcBroadcasterHolder broadcasterHolder;
-
-    /** 通过 holder 单向读取角色，避免回环依赖 ClusteredService */
-    @Resource
-    private ClusterRoleHolder roleHolder;
+    private ResultLogWriter resultLogWriter;
 
     /**
      * flyweight 复用，避免热路径上频繁分配对象
@@ -231,15 +223,8 @@ public class CommandDispatcher {
     private void flushAndPersist() {
         List<MatchResult> batch = eventsHelper.endRequest();
         if (!batch.isEmpty()) {
-            // 1) 持久化到 archive (每节点都写，保持状态机确定性)
-            resultRepository.persist(batch);
-
-            // 2) MDC 广播：只有 LEADER 推送，避免 3 副本重复广播
-            // todo 升级思路：单独抽出一个进程去异步从archive中获取数据并执行回放。
-            ResultMdcBroadcaster broadcaster = broadcasterHolder.get();
-            if (broadcaster != null && roleHolder.isLeader()) {
-                broadcaster.broadcastBatch(batch);
-            }
+            // 持久化结果
+            resultLogWriter.append(batch);
         }
     }
 
