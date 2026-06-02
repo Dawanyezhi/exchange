@@ -8,6 +8,7 @@ import com.laser.exchange.matching.core.service.MatchCoreService;
 import com.laser.exchange.common.enums.CancelReasonEnum;
 import com.laser.exchange.matching.enums.OpEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
+import com.laser.exchange.common.enums.SystemErrorCodeEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
 import com.laser.exchange.matching.config.MarketOrderConfig;
 import com.laser.exchange.matching.core.service.StpStrategyService;
@@ -92,6 +93,8 @@ public class MatchEngine {
 
         if (checkMatchConfig(symbolId)) {
             log.warn("[下单拒绝] symbolId={} 未配置或未启用交易", symbolId);
+            eventsHelper.appendReject(SystemErrorCodeEnum.SYMBOL_NOT_TRADING, matchOrder.getOrderId(),
+                    symbolId, "symbol not trading");
             return;
         }
 
@@ -108,6 +111,8 @@ public class MatchEngine {
         if (orderBook.isOrderExists(matchOrder.getOrderId())) {
             log.error("placeOrder rejected. order exists! orderId={}", matchOrder.getOrderId());
             matchOrder.reject();
+            eventsHelper.appendReject(SystemErrorCodeEnum.DUPLICATE_ORDER, matchOrder.getOrderId(),
+                    symbolId, "duplicate order");
             return;
         }
 
@@ -136,6 +141,7 @@ public class MatchEngine {
 
         if (checkMatchConfig(symbolId)) {
             log.warn("cancelOrder fail. checkMatchConfig error:{}", symbolId);
+            eventsHelper.appendReject(SystemErrorCodeEnum.SYMBOL_NOT_TRADING, orderId, symbolId, "symbol not trading");
             return;
         }
 
@@ -143,10 +149,12 @@ public class MatchEngine {
         OrderBook orderBook = matchContext.getOrderBook(symbolId);
         if (orderBook == null) {
             log.error("cancelOrder fail. No such orderBook. orderId:{}, symbolId:{}", orderId, symbolId);
+            eventsHelper.appendReject(SystemErrorCodeEnum.ORDER_NOT_FOUND, orderId, symbolId, "order book not found");
             return;
         }
         MatchOrder matchOrder = orderBook.getOrder(orderId);
         if (Objects.isNull(matchOrder)) {
+            eventsHelper.appendReject(SystemErrorCodeEnum.ORDER_NOT_FOUND, orderId, symbolId, "order not found");
             return;
         }
 
@@ -171,14 +179,25 @@ public class MatchEngine {
 
         if (checkMatchConfig(symbolId)) {
             log.warn("cancelOrder fail. checkMatchConfig error:{}", symbolId);
+            eventsHelper.appendReject(SystemErrorCodeEnum.SYMBOL_NOT_TRADING, orderId, symbolId, "symbol not trading");
             return;
         }
 
         MatchContext matchContext = matchEngineState.getMatchContext();
         OrderBook orderBook = matchContext.getOrderBook(symbolId);
+        if (orderBook == null) {
+            eventsHelper.appendReject(SystemErrorCodeEnum.ORDER_NOT_FOUND, orderId, symbolId, "order book not found");
+            return;
+        }
 
         MatchOrder originalOrder = orderBook.getOrder(orderId);
         if (Objects.isNull(originalOrder)) {
+            eventsHelper.appendReject(SystemErrorCodeEnum.ORDER_NOT_FOUND, orderId, symbolId, "order not found");
+            return;
+        }
+
+        if (!BigDecimalUtil.greaterThanZero(newDelegatePrice) && !BigDecimalUtil.greaterThanZero(newDelegateCount)) {
+            eventsHelper.appendReject(SystemErrorCodeEnum.INVALID_AMEND, orderId, symbolId, "no amend field changed");
             return;
         }
 
@@ -191,6 +210,7 @@ public class MatchEngine {
         }
 
         orderBook.amendOrder(amendedOrder, originalOrder);
+        eventsHelper.appendAmend(amendedOrder);
 
         // orderBook.printOrderBook("amendOrder");
     }
@@ -413,11 +433,12 @@ public class MatchEngine {
             // [实战中可能需要考虑]: 自成交保护，如果是同一个用户下单，并且价格交叉，开启了配置：需要进行自成交保护，那么就会跳过同一个人的订单
             OpEnum opEnum = stpStrategyService.processSTP(newOrder, oppoOrder, pendingRemoves);
             if (opEnum == OpEnum.OP_BREAK) {
-                // 当前订单撤销，终止撮合
+                appendStpCancelEvents(newOrder, oppoOrder, pendingRemoves);
                 endMatch = true;
                 return endMatch;
             }
             if (opEnum == OpEnum.OP_CONTINUE) {
+                appendStpCancelEvents(newOrder, oppoOrder, pendingRemoves);
                 // 对手单因为自成交保护撤销，跳过本轮，继续下一轮
                 continue;
             }
@@ -437,7 +458,6 @@ public class MatchEngine {
                         oppoOrder,
                         oppoOrder.getDelegatePrice(),      // 撮合价 = maker 价
                         thisTradeAmount,
-                        newOrder.getRemainingQuantity(),
                         newOrder.getOrderStatus()
                 );
             }
@@ -462,7 +482,7 @@ public class MatchEngine {
      * @param orderBook
      */
     void processFokOrder(MatchOrder newOrder, OrderBook orderBook) {
-        fokOrderProcessor.process(newOrder, orderBook);
+        fokOrderProcessor.process(newOrder, orderBook, eventsHelper);
     }
 
 
@@ -557,9 +577,11 @@ public class MatchEngine {
 
             OpEnum opEnum = stpStrategyService.processSTP(marketOrder, maker, pendingRemoves);
             if (opEnum == OpEnum.OP_BREAK) {
+                appendStpCancelEvents(marketOrder, maker, pendingRemoves);
                 return true;
             }
             if (opEnum == OpEnum.OP_CONTINUE) {
+                appendStpCancelEvents(marketOrder, maker, pendingRemoves);
                 continue;
             }
 
@@ -591,7 +613,6 @@ public class MatchEngine {
                         maker,
                         maker.getDelegatePrice(),
                         thisTradeAmount,
-                        marketOrder.getRemainingQuantity(),
                         marketOrder.getOrderStatus()
                 );
             }
@@ -688,6 +709,18 @@ public class MatchEngine {
     private void cancelMarketRemaining(MatchOrder marketOrder) {
         marketOrder.cancel(CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING);
         eventsHelper.appendCancel(marketOrder, CancelReasonEnum.MARKET_NOT_FULLFILL_CANCEL_REMAINING);
+    }
+
+    private void appendStpCancelEvents(MatchOrder taker, MatchOrder maker, List<MatchOrder> pendingRemoves) {
+        if (taker != null && taker.getOrderStatus() == OrderStatusEnum.CANCELLED) {
+            eventsHelper.appendCancel(taker, taker.getCancelReason());
+        }
+        if (maker != null
+                && maker.getOrderStatus() == OrderStatusEnum.CANCELLED
+                && pendingRemoves != null
+                && pendingRemoves.contains(maker)) {
+            eventsHelper.appendCancel(maker, maker.getCancelReason());
+        }
     }
 
     /**

@@ -31,21 +31,47 @@ import java.math.BigDecimal;
 @EqualsAndHashCode(callSuper = true)
 public class MatchOrderResult extends MatchResult {
 
-    private long orderId;
-    /** 对手方订单号 */
-    private long oppositeOrderId;
+    /** 成交唯一编号。当前阶段使用 resultSerialNum 作为 tradeId。 */
+    private long tradeId;
+
+    /** 主动吃单方订单号。 */
+    private long takerOrderId;
+
+    /** 被动挂单方订单号。 */
+    private long makerOrderId;
+
+    /** 币对数字编码，来自 symbol 配置；当前撮合模型尚未回填时为 0。 */
     private int symbolCode;
-    private OrderStatusEnum orderStatus;
+
+    /** 本笔成交后 taker 订单状态。 */
+    private OrderStatusEnum takerOrderStatus;
+
+    /** 本笔成交后 maker 订单状态。 */
+    private OrderStatusEnum makerOrderStatus;
+
+    /** 币对标识，例如 BTC_USDT。 */
     private String symbolId;
+
+    /** 本笔成交价格。按 maker 价格成交。 */
     private BigDecimal tradePrice;
-    private BigDecimal counterTradePrice;
-    private BigDecimal tradeAmount;
-    private BigDecimal counterTradeAmount;
-    private BigDecimal remainingAmount;
+
+    /** 本笔成交基础币数量。 */
     private BigDecimal tradeBaseQty;
+
+    /** 本笔成交计价币金额，等于 tradePrice * tradeBaseQty。 */
     private BigDecimal tradeQuoteAmount;
-    private BigDecimal remainingBaseQty;
-    private BigDecimal remainingQuoteAmount;
+
+    /** 本笔成交后 taker 剩余基础币数量；按 quote 金额买入的市价单为 0。 */
+    private BigDecimal takerRemainingBaseQty;
+
+    /** 本笔成交后 taker 剩余计价币预算或目标；不适用时为 0。 */
+    private BigDecimal takerRemainingQuoteAmount;
+
+    /** 本笔成交后 maker 剩余基础币数量。 */
+    private BigDecimal makerRemainingBaseQty;
+
+    /** 本笔成交后 maker 剩余计价币金额；限价 maker 当前为 0。 */
+    private BigDecimal makerRemainingQuoteAmount;
 
     @Override
     public int encode(MutableDirectBuffer buffer, int offset) {
@@ -61,22 +87,24 @@ public class MatchOrderResult extends MatchResult {
                 .requestSerialNum(requestSerialNum)
                 .createTime(createTime);
 
-        enc.orderId(orderId);
-        enc.oppositeOrderId(oppositeOrderId);
+        enc.tradeId(tradeId);
+        enc.takerOrderId(takerOrderId);
+        enc.makerOrderId(makerOrderId);
         enc.symbolCode(symbolCode);
-        enc.orderStatus(orderStatus != null
-                ? OrderStatus.get((short) orderStatus.getCode())
+        enc.takerOrderStatus(takerOrderStatus != null
+                ? OrderStatus.get((short) takerOrderStatus.getCode())
+                : OrderStatus.NULL_VAL);
+        enc.makerOrderStatus(makerOrderStatus != null
+                ? OrderStatus.get((short) makerOrderStatus.getCode())
                 : OrderStatus.NULL_VAL);
         enc.symbolId(symbolId != null ? symbolId : "");
         enc.tradePrice(BigDecimalUtil.defaultToString(tradePrice));
-        enc.counterTradePrice(BigDecimalUtil.defaultToString(counterTradePrice));
-        enc.tradeAmount(BigDecimalUtil.defaultToString(tradeAmount));
-        enc.counterTradeAmount(BigDecimalUtil.defaultToString(counterTradeAmount));
-        enc.remainingAmount(BigDecimalUtil.defaultToString(remainingAmount));
         enc.tradeBaseQty(BigDecimalUtil.defaultToString(tradeBaseQty));
         enc.tradeQuoteAmount(BigDecimalUtil.defaultToString(tradeQuoteAmount));
-        enc.remainingBaseQty(BigDecimalUtil.defaultToString(remainingBaseQty));
-        enc.remainingQuoteAmount(BigDecimalUtil.defaultToString(remainingQuoteAmount));
+        enc.takerRemainingBaseQty(BigDecimalUtil.defaultToString(takerRemainingBaseQty));
+        enc.takerRemainingQuoteAmount(BigDecimalUtil.defaultToString(takerRemainingQuoteAmount));
+        enc.makerRemainingBaseQty(BigDecimalUtil.defaultToString(makerRemainingBaseQty));
+        enc.makerRemainingQuoteAmount(BigDecimalUtil.defaultToString(makerRemainingQuoteAmount));
 
         return MessageHeaderEncoder.ENCODED_LENGTH + enc.encodedLength();
     }
@@ -88,25 +116,29 @@ public class MatchOrderResult extends MatchResult {
         dec.wrapAndApplyHeader(buffer, offset, header);
 
         decodeHeader(dec.header());
-        this.orderId = dec.orderId();
-        this.oppositeOrderId = dec.oppositeOrderId();
+        this.tradeId = dec.tradeId();
+        this.takerOrderId = dec.takerOrderId();
+        this.makerOrderId = dec.makerOrderId();
         this.symbolCode = dec.symbolCode();
 
-        OrderStatus status = dec.orderStatus();
-        this.orderStatus = status != OrderStatus.NULL_VAL
-                ? OrderStatusEnum.of(status.value())
+        OrderStatus takerStatus = dec.takerOrderStatus();
+        this.takerOrderStatus = takerStatus != OrderStatus.NULL_VAL
+                ? OrderStatusEnum.of(takerStatus.value())
+                : null;
+
+        OrderStatus makerStatus = dec.makerOrderStatus();
+        this.makerOrderStatus = makerStatus != OrderStatus.NULL_VAL
+                ? OrderStatusEnum.of(makerStatus.value())
                 : null;
 
         this.symbolId = dec.symbolId();
         this.tradePrice = BigDecimalUtil.stringToBigDecimal(dec.tradePrice());
-        this.counterTradePrice = BigDecimalUtil.stringToBigDecimal(dec.counterTradePrice());
-        this.tradeAmount = BigDecimalUtil.stringToBigDecimal(dec.tradeAmount());
-        this.counterTradeAmount = BigDecimalUtil.stringToBigDecimal(dec.counterTradeAmount());
-        this.remainingAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingAmount());
         this.tradeBaseQty = BigDecimalUtil.stringToBigDecimal(dec.tradeBaseQty());
         this.tradeQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.tradeQuoteAmount());
-        this.remainingBaseQty = BigDecimalUtil.stringToBigDecimal(dec.remainingBaseQty());
-        this.remainingQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.remainingQuoteAmount());
+        this.takerRemainingBaseQty = BigDecimalUtil.stringToBigDecimal(dec.takerRemainingBaseQty());
+        this.takerRemainingQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.takerRemainingQuoteAmount());
+        this.makerRemainingBaseQty = BigDecimalUtil.stringToBigDecimal(dec.makerRemainingBaseQty());
+        this.makerRemainingQuoteAmount = BigDecimalUtil.stringToBigDecimal(dec.makerRemainingQuoteAmount());
         return this;
     }
 }

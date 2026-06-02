@@ -6,6 +6,7 @@ import com.laser.exchange.matching.core.model.OrderBook;
 import com.laser.exchange.common.enums.CancelReasonEnum;
 import com.laser.exchange.matching.enums.OpEnum;
 import com.laser.exchange.common.enums.OrderStatusEnum;
+import com.laser.exchange.matching.result.MatchResultEventsHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.collections.Long2ObjectHashMap;
 
@@ -27,13 +28,14 @@ public class FokOrderProcessor {
     private Long2ObjectHashMap<CancelReasonEnum> fokCancelReasonMap = new Long2ObjectHashMap<>();
 
 
-    public void process(MatchOrder newOrder, OrderBook orderBook) {
+    public void process(MatchOrder newOrder, OrderBook orderBook, MatchResultEventsHelper eventsHelper) {
 
         try {
 
             // 价格交叉，不交叉撤单
             if (!orderBook.isCross(newOrder)) {
                 newOrder.cancel(CancelReasonEnum.FOK_NOT_CROSS);
+                eventsHelper.appendCancel(newOrder, CancelReasonEnum.FOK_NOT_CROSS);
                 return;
             }
 
@@ -75,17 +77,19 @@ public class FokOrderProcessor {
             // fok不能完全成交，则撤销真实fok订单
             if (copyOrder.getOrderStatus() != OrderStatusEnum.FULL_FILLED) {
                 newOrder.cancel(CancelReasonEnum.FOK_NOT_FULLFILL_CANCEL);
+                eventsHelper.appendCancel(newOrder, CancelReasonEnum.FOK_NOT_FULLFILL_CANCEL);
                 return;
             }
 
             // phase2: 真实撮合, 先把需要撤销的进行撤单
             for (MatchOrder needCancelOrder : fokPendingRemoves) {
                 needCancelOrder.cancel(fokCancelReasonMap.get(needCancelOrder.getOrderId()));
+                eventsHelper.appendCancel(needCancelOrder, fokCancelReasonMap.get(needCancelOrder.getOrderId()));
                 orderBook.removeOrder(needCancelOrder);
             }
 
             // 进行撮合
-            fokTryMatchInstantly(newOrder, orderBook);
+            fokTryMatchInstantly(newOrder, orderBook, eventsHelper);
 
         } finally {
             fokPendingRemoves.clear();
@@ -144,7 +148,7 @@ public class FokOrderProcessor {
         return endMatch;
     }
 
-    private void fokTryMatchInstantly(MatchOrder newOrder, OrderBook orderBook) {
+    private void fokTryMatchInstantly(MatchOrder newOrder, OrderBook orderBook, MatchResultEventsHelper eventsHelper) {
 
         // 获取对手盘
         TreeMap<BigDecimal, DepthLine> oppositeBook = orderBook.getOppositeBook(newOrder);
@@ -171,7 +175,7 @@ public class FokOrderProcessor {
                 break;
             }
 
-            exit = this.fokDoMatch(newOrder, depthLine, orderBook);
+            exit = this.fokDoMatch(newOrder, depthLine, orderBook, eventsHelper);
 
             // 如果当前价格档位为empty，则移除
             MatchCoreService.INSTANCE.clearEmptyDepthLine(depthLine, iterator);
@@ -187,7 +191,8 @@ public class FokOrderProcessor {
 
     }
 
-    private boolean fokDoMatch(MatchOrder newOrder, DepthLine depthLine, OrderBook orderBook) {
+    private boolean fokDoMatch(MatchOrder newOrder, DepthLine depthLine, OrderBook orderBook,
+                               MatchResultEventsHelper eventsHelper) {
 
         Iterator<MatchOrder> orderIterator = depthLine.iterator();
 
@@ -197,8 +202,22 @@ public class FokOrderProcessor {
 
             MatchOrder oppoOrder = orderIterator.next();
 
-            // 成交
+            BigDecimal takerDealtBefore = newOrder.getDealtCount() != null
+                    ? newOrder.getDealtCount() : BigDecimal.ZERO;
             MatchCoreService.INSTANCE.doMatch(newOrder, oppoOrder, orderIterator, orderBook);
+            BigDecimal takerDealtAfter = newOrder.getDealtCount() != null
+                    ? newOrder.getDealtCount() : BigDecimal.ZERO;
+            BigDecimal thisTradeAmount = takerDealtAfter.subtract(takerDealtBefore);
+
+            if (thisTradeAmount.signum() > 0) {
+                eventsHelper.appendMatch(
+                        newOrder,
+                        oppoOrder,
+                        oppoOrder.getDelegatePrice(),
+                        thisTradeAmount,
+                        newOrder.getOrderStatus()
+                );
+            }
 
             // 当前订单是否撮合完成
             if (newOrder.isMatchOver()) {

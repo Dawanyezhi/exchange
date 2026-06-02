@@ -1,18 +1,7 @@
 package com.laser.exchange.matching.result;
 
-import com.laser.exchange.common.enums.CancelReasonEnum;
-import com.laser.exchange.common.enums.MarketTargetTypeEnum;
-import com.laser.exchange.common.enums.OrderStatusEnum;
-import com.laser.exchange.common.enums.ResultBizTypeEnum;
-import com.laser.exchange.common.enums.SymbolOpEnum;
-import com.laser.exchange.common.enums.SystemErrorCodeEnum;
-import com.laser.exchange.common.enums.SystemTypeEnum;
-import com.laser.exchange.common.result.CancelOrderResult;
-import com.laser.exchange.common.result.MatchOrderResult;
-import com.laser.exchange.common.result.MatchResult;
-import com.laser.exchange.common.result.PlaceOrderResult;
-import com.laser.exchange.common.result.TradeSwitchResult;
-import com.laser.exchange.common.result.UpDownSymbolResult;
+import com.laser.exchange.common.enums.*;
+import com.laser.exchange.common.result.*;
 import com.laser.exchange.matching.core.model.MatchOrder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -117,29 +106,34 @@ public class MatchResultEventsHelper {
 
     public MatchOrderResult appendMatch(MatchOrder taker, MatchOrder maker,
                                         BigDecimal tradePrice, BigDecimal tradeAmount,
-                                        BigDecimal takerRemaining, OrderStatusEnum takerStatus) {
+                                        OrderStatusEnum takerStatus) {
+        long resultSerialNum = allocSerialNum();
         BigDecimal tradeQuoteAmount = tradePrice.multiply(tradeAmount);
+        BigDecimal takerRemainingBaseQty = resolveRemainingBaseQty(taker);
+        BigDecimal takerRemainingQuoteAmount = resolveRemainingQuoteAmount(taker);
+        BigDecimal makerRemainingBaseQty = resolveRemainingBaseQty(maker);
+        BigDecimal makerRemainingQuoteAmount = resolveRemainingQuoteAmount(maker);
         MatchOrderResult result = MatchOrderResult.builder()
                 .systemType(SystemTypeEnum.NORMAL)
                 .systemErrorCode(SystemErrorCodeEnum.NONE)
                 .resultBizType(ResultBizTypeEnum.MATCH)
-                .resultSerialNum(allocSerialNum())
+                .resultSerialNum(resultSerialNum)
                 .requestSerialNum(currentRequestSerialNum)
                 .createTime(currentTimestamp)
-                .orderId(taker.getOrderId())
-                .oppositeOrderId(maker.getOrderId())
+                .tradeId(resultSerialNum)
+                .takerOrderId(taker.getOrderId())
+                .makerOrderId(maker.getOrderId())
                 .symbolCode(0)
                 .symbolId(taker.getSymbolId())
-                .orderStatus(takerStatus)
+                .takerOrderStatus(takerStatus)
+                .makerOrderStatus(maker.getOrderStatus())
                 .tradePrice(tradePrice)
-                .counterTradePrice(maker.getDelegatePrice())
-                .tradeAmount(tradeAmount)
-                .counterTradeAmount(tradeAmount) // 双边数量相等
-                .remainingAmount(resolveLegacyRemainingAmount(taker, takerRemaining))
                 .tradeBaseQty(tradeAmount)
                 .tradeQuoteAmount(tradeQuoteAmount)
-                .remainingBaseQty(resolveRemainingBaseQty(taker))
-                .remainingQuoteAmount(resolveRemainingQuoteAmount(taker))
+                .takerRemainingBaseQty(takerRemainingBaseQty)
+                .takerRemainingQuoteAmount(takerRemainingQuoteAmount)
+                .makerRemainingBaseQty(makerRemainingBaseQty)
+                .makerRemainingQuoteAmount(makerRemainingQuoteAmount)
                 .build();
         currentBatch.add(result);
         return result;
@@ -164,6 +158,47 @@ public class MatchResultEventsHelper {
                 .remainingBaseQty(resolveRemainingBaseQty(order))
                 .remainingQuoteAmount(resolveRemainingQuoteAmount(order))
                 .usedQuoteAmount(order.getUsedQuoteAmount())
+                .build();
+        currentBatch.add(result);
+        return result;
+    }
+
+    public AmendOrderResult appendAmend(MatchOrder order) {
+        AmendOrderResult result = AmendOrderResult.builder()
+                .systemType(SystemTypeEnum.NORMAL)
+                .systemErrorCode(SystemErrorCodeEnum.NONE)
+                .resultBizType(ResultBizTypeEnum.AMEND_ORDER)
+                .resultSerialNum(allocSerialNum())
+                .requestSerialNum(currentRequestSerialNum)
+                .createTime(currentTimestamp)
+                .orderId(order.getOrderId())
+                .symbolCode(0)
+                .symbolId(order.getSymbolId())
+                .orderStatus(order.getOrderStatus())
+                .delegatePrice(order.getDelegatePrice())
+                .delegateCount(order.getDelegateCount())
+                .remainingAmount(resolveRemainingBaseQty(order))
+                .remainingBaseQty(resolveRemainingBaseQty(order))
+                .remainingQuoteAmount(resolveRemainingQuoteAmount(order))
+                .build();
+        currentBatch.add(result);
+        return result;
+    }
+
+    public OrderRejectResult appendReject(SystemErrorCodeEnum errorCode, long orderId,
+                                          String symbolId, String rejectReason) {
+        OrderRejectResult result = OrderRejectResult.builder()
+                .systemType(SystemTypeEnum.ERROR)
+                .systemErrorCode(errorCode)
+                .resultBizType(ResultBizTypeEnum.ORDER_REJECT)
+                .resultSerialNum(allocSerialNum())
+                .requestSerialNum(currentRequestSerialNum)
+                .createTime(currentTimestamp)
+                .orderId(orderId)
+                .symbolCode(0)
+                .symbolId(symbolId != null ? symbolId : "")
+                .orderStatus(OrderStatusEnum.REJECTED)
+                .rejectReason(rejectReason)
                 .build();
         currentBatch.add(result);
         return result;
@@ -210,14 +245,12 @@ public class MatchResultEventsHelper {
     /**
      * 生成"系统级错误"结果。常见用法：serialNum 不连续、币对未上线等。
      *
-     * <p>通过复用 {@link PlaceOrderResult} 形态承载错误，让下游用统一通道消费。
-     * 错误结果不携带订单业务字段（orderId 可传 0）。
      */
-    public PlaceOrderResult appendError(SystemErrorCodeEnum errorCode, long requestSerialNum) {
-        PlaceOrderResult result = PlaceOrderResult.builder()
+    public OrderRejectResult appendError(SystemErrorCodeEnum errorCode, long requestSerialNum) {
+        OrderRejectResult result = OrderRejectResult.builder()
                 .systemType(SystemTypeEnum.ERROR)
                 .systemErrorCode(errorCode)
-                .resultBizType(ResultBizTypeEnum.PLACE_ORDER)
+                .resultBizType(ResultBizTypeEnum.ORDER_REJECT)
                 .resultSerialNum(allocSerialNum())
                 .requestSerialNum(requestSerialNum)
                 .createTime(currentTimestamp)
@@ -225,11 +258,7 @@ public class MatchResultEventsHelper {
                 .symbolCode(0)
                 .symbolId("")
                 .orderStatus(OrderStatusEnum.REJECTED)
-                .delegatePrice(BigDecimal.ZERO)
-                .delegateCount(BigDecimal.ZERO)
-                .lockedBaseAmount(BigDecimal.ZERO)
-                .lockedQuoteAmount(BigDecimal.ZERO)
-                .marketTargetType(MarketTargetTypeEnum.BASE_QTY)
+                .rejectReason("system error: " + errorCode)
                 .build();
         currentBatch.add(result);
         return result;
@@ -246,13 +275,6 @@ public class MatchResultEventsHelper {
             return order.getRemainingBaseBudget();
         }
         return order.getRemainingQuantity();
-    }
-
-    private BigDecimal resolveLegacyRemainingAmount(MatchOrder order, BigDecimal takerRemaining) {
-        if (order != null && order.isMarketTargetQuoteAmount()) {
-            return resolveRemainingBaseQty(order);
-        }
-        return takerRemaining != null ? takerRemaining : BigDecimal.ZERO;
     }
 
     private BigDecimal resolveRemainingQuoteAmount(MatchOrder order) {

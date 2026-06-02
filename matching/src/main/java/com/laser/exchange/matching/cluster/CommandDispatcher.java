@@ -1,10 +1,6 @@
 package com.laser.exchange.matching.cluster;
 
-import com.laser.exchange.common.AmendOrderRequest;
-import com.laser.exchange.common.CancelOrderRequest;
-import com.laser.exchange.common.PlaceOrderRequest;
-import com.laser.exchange.common.TradeSwitchRequest;
-import com.laser.exchange.common.UpDownSymbolRequest;
+import com.laser.exchange.common.*;
 import com.laser.exchange.common.codec.MessageHeaderDecoder;
 import com.laser.exchange.common.enums.SystemErrorCodeEnum;
 import com.laser.exchange.common.result.MatchResult;
@@ -18,12 +14,9 @@ import com.laser.exchange.matching.result.ResultMdcBroadcaster;
 import com.laser.exchange.matching.result.ResultMdcBroadcasterHolder;
 import com.laser.exchange.matching.resultRepoModule.ResultRepository;
 import com.laser.exchange.matching.validation.SerialNumValidator;
-import io.aeron.cluster.service.ClientSession;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.DirectBuffer;
-import org.agrona.ExpandableArrayBuffer;
-import org.agrona.MutableDirectBuffer;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -110,13 +103,14 @@ public class CommandDispatcher {
         String symbolId = matchContext.getSymbolNameByCode(placeOrderRequest.getSymbolCode());
         if (Objects.isNull(symbolId)) {
             log.error("No such symbolConfig, {}", placeOrderRequest.getSymbolCode());
-            emitSymbolNotTradingError(timestamp, placeOrderRequest.getSerialNum());
+            emitOrderReject(timestamp, placeOrderRequest.getSerialNum(), placeOrderRequest.getOrderId(), "",
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol config not found");
             return;
         }
         if (!isTradeEnabled(symbolId)) {
-            log.warn("[handlePlace] symbol {} 未开启交易,发停交易事件", symbolId);
-            emitTradeStoppedEvent(timestamp, placeOrderRequest.getSymbolCode(), symbolId,
-                    placeOrderRequest.getSerialNum());
+            log.warn("[handlePlace] symbol {} 未开启交易,发拒绝事件", symbolId);
+            emitOrderReject(timestamp, placeOrderRequest.getSerialNum(), placeOrderRequest.getOrderId(), symbolId,
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol not trading");
             return;
         }
 
@@ -141,13 +135,14 @@ public class CommandDispatcher {
         String symbolId = matchContext.getSymbolNameByCode(amendOrderRequest.getSymbolCode());
         if (Objects.isNull(symbolId)) {
             log.error("No such symbolConfig, {}", amendOrderRequest.getSymbolCode());
-            emitSymbolNotTradingError(timestamp, amendOrderRequest.getSerialNum());
+            emitOrderReject(timestamp, amendOrderRequest.getSerialNum(), amendOrderRequest.getOrderId(), "",
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol config not found");
             return;
         }
         if (!isTradeEnabled(symbolId)) {
-            log.warn("[handleAmend] symbol {} 未开启交易,发停交易事件", symbolId);
-            emitTradeStoppedEvent(timestamp, amendOrderRequest.getSymbolCode(), symbolId,
-                    amendOrderRequest.getSerialNum());
+            log.warn("[handleAmend] symbol {} 未开启交易,发拒绝事件", symbolId);
+            emitOrderReject(timestamp, amendOrderRequest.getSerialNum(), amendOrderRequest.getOrderId(), symbolId,
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol not trading");
             return;
         }
 
@@ -174,13 +169,14 @@ public class CommandDispatcher {
         String symbolId = matchContext.getSymbolNameByCode(cancelOrderRequest.getSymbolCode());
         if (Objects.isNull(symbolId)) {
             log.error("No such symbolConfig, {}", cancelOrderRequest.getSymbolCode());
-            emitSymbolNotTradingError(timestamp, cancelOrderRequest.getSerialNum());
+            emitOrderReject(timestamp, cancelOrderRequest.getSerialNum(), cancelOrderRequest.getOrderId(), "",
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol config not found");
             return;
         }
         if (!isTradeEnabled(symbolId)) {
-            log.warn("[handleCancel] symbol {} 未开启交易,发停交易事件", symbolId);
-            emitTradeStoppedEvent(timestamp, cancelOrderRequest.getSymbolCode(), symbolId,
-                    cancelOrderRequest.getSerialNum());
+            log.warn("[handleCancel] symbol {} 未开启交易,发拒绝事件", symbolId);
+            emitOrderReject(timestamp, cancelOrderRequest.getSerialNum(), cancelOrderRequest.getOrderId(), symbolId,
+                    SystemErrorCodeEnum.SYMBOL_NOT_TRADING, "symbol not trading");
             return;
         }
 
@@ -193,13 +189,6 @@ public class CommandDispatcher {
     private boolean isTradeEnabled(String symbolId) {
         MatchConfig mc = matchEngine.getMatchEngineState().getMatchConfig(symbolId);
         return mc != null && mc.isEnabled();
-    }
-
-    /** 未启用交易时主动推送 TradeSwitchResult(switchOn=false) 让上游感知 */
-    private void emitTradeStoppedEvent(long timestamp, int symbolCode, String symbolName, long requestSerialNum) {
-        eventsHelper.beginRequest(requestSerialNum, timestamp);
-        eventsHelper.appendTradeSwitch(symbolCode, symbolName, false);
-        flushAndPersist();
     }
 
     /**
@@ -260,9 +249,10 @@ public class CommandDispatcher {
         flushAndPersist();
     }
 
-    private void emitSymbolNotTradingError(long timestamp, long requestSerialNum) {
+    private void emitOrderReject(long timestamp, long requestSerialNum, long orderId, String symbolId,
+                                 SystemErrorCodeEnum errorCode, String reason) {
         eventsHelper.beginRequest(requestSerialNum, timestamp);
-        eventsHelper.appendError(SystemErrorCodeEnum.SYMBOL_NOT_TRADING, requestSerialNum);
+        eventsHelper.appendReject(errorCode, orderId, symbolId, reason);
         flushAndPersist();
     }
 }

@@ -19,7 +19,11 @@ public enum SystemErrorCodeEnum {
     /** 币对未开启交易 */
     SYMBOL_NOT_TRADING((byte) 3),
     /** 重复的订单下单 */
-    DUPLICATE_ORDER((byte) 4);
+    DUPLICATE_ORDER((byte) 4),
+    /** 订单不存在 */
+    ORDER_NOT_FOUND((byte) 5),
+    /** 改单参数非法 */
+    INVALID_AMEND((byte) 6);
 
     private final byte code;
 

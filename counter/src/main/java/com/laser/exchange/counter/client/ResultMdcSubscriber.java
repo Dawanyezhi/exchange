@@ -1,14 +1,18 @@
 package com.laser.exchange.counter.client;
 
 import com.laser.exchange.common.codec.CancelOrderResultDecoder;
+import com.laser.exchange.common.codec.AmendOrderResultDecoder;
 import com.laser.exchange.common.codec.MatchOrderResultDecoder;
 import com.laser.exchange.common.codec.MessageHeaderDecoder;
+import com.laser.exchange.common.codec.OrderRejectResultDecoder;
 import com.laser.exchange.common.codec.PlaceOrderResultDecoder;
 import com.laser.exchange.common.codec.TradeSwitchResultDecoder;
 import com.laser.exchange.common.codec.UpDownSymbolResultDecoder;
+import com.laser.exchange.common.result.AmendOrderResult;
 import com.laser.exchange.common.result.CancelOrderResult;
 import com.laser.exchange.common.result.MatchOrderResult;
 import com.laser.exchange.common.result.MatchResult;
+import com.laser.exchange.common.result.OrderRejectResult;
 import com.laser.exchange.common.result.PlaceOrderResult;
 import com.laser.exchange.common.result.TradeSwitchResult;
 import com.laser.exchange.common.result.UpDownSymbolResult;
@@ -78,6 +82,8 @@ public class ResultMdcSubscriber {
     private final CancelOrderResult cancelOrderResult = new CancelOrderResult();
     private final UpDownSymbolResult upDownSymbolResult = new UpDownSymbolResult();
     private final TradeSwitchResult tradeSwitchResult = new TradeSwitchResult();
+    private final AmendOrderResult amendOrderResult = new AmendOrderResult();
+    private final OrderRejectResult orderRejectResult = new OrderRejectResult();
 
 
     @PostConstruct
@@ -163,6 +169,8 @@ public class ResultMdcSubscriber {
             case CancelOrderResultDecoder.TEMPLATE_ID -> cancelOrderResult.decode(buffer, offset);
             case UpDownSymbolResultDecoder.TEMPLATE_ID -> upDownSymbolResult.decode(buffer, offset);
             case TradeSwitchResultDecoder.TEMPLATE_ID -> tradeSwitchResult.decode(buffer, offset);
+            case AmendOrderResultDecoder.TEMPLATE_ID -> amendOrderResult.decode(buffer, offset);
+            case OrderRejectResultDecoder.TEMPLATE_ID -> orderRejectResult.decode(buffer, offset);
             default -> null;
         };
     }

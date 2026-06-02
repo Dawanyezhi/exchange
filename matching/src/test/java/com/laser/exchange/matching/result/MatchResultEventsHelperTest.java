@@ -10,8 +10,10 @@ import com.laser.exchange.common.enums.SystemErrorCodeEnum;
 import com.laser.exchange.common.enums.SystemTypeEnum;
 import com.laser.exchange.common.enums.TimeInForceEnum;
 import com.laser.exchange.common.result.CancelOrderResult;
+import com.laser.exchange.common.result.AmendOrderResult;
 import com.laser.exchange.common.result.MatchOrderResult;
 import com.laser.exchange.common.result.MatchResult;
+import com.laser.exchange.common.result.OrderRejectResult;
 import com.laser.exchange.common.result.PlaceOrderResult;
 import com.laser.exchange.common.result.TradeSwitchResult;
 import com.laser.exchange.common.result.UpDownSymbolResult;
@@ -119,16 +121,17 @@ class MatchResultEventsHelperTest {
 
         MatchOrderResult result = helper.appendMatch(taker, maker,
                 new BigDecimal("49999"), new BigDecimal("2"),
-                BigDecimal.ZERO, OrderStatusEnum.FULL_FILLED);
+                OrderStatusEnum.FULL_FILLED);
 
         assertEquals(ResultBizTypeEnum.MATCH, result.getResultBizType());
-        assertEquals(100L, result.getOrderId());
-        assertEquals(200L, result.getOppositeOrderId());
+        assertEquals(result.getResultSerialNum(), result.getTradeId());
+        assertEquals(100L, result.getTakerOrderId());
+        assertEquals(200L, result.getMakerOrderId());
         assertEquals(new BigDecimal("49999"), result.getTradePrice());
-        assertEquals(new BigDecimal("2"), result.getTradeAmount());
         assertEquals(new BigDecimal("2"), result.getTradeBaseQty());
         assertEquals(new BigDecimal("99998"), result.getTradeQuoteAmount());
-        assertEquals(OrderStatusEnum.FULL_FILLED, result.getOrderStatus());
+        assertEquals(OrderStatusEnum.FULL_FILLED, result.getTakerOrderStatus());
+        assertEquals(OrderStatusEnum.NEW, result.getMakerOrderStatus());
     }
 
     @Test
@@ -153,12 +156,12 @@ class MatchResultEventsHelperTest {
 
         MatchOrderResult result = helper.appendMatch(taker, maker,
                 new BigDecimal("30000"), new BigDecimal("0.002"),
-                BigDecimal.ZERO, OrderStatusEnum.PARTIALLY_FILLED);
+                OrderStatusEnum.PARTIALLY_FILLED);
 
         assertEquals(new BigDecimal("0.002"), result.getTradeBaseQty());
         assertEquals(new BigDecimal("60.000"), result.getTradeQuoteAmount());
-        assertEquals(BigDecimal.ZERO, result.getRemainingBaseQty());
-        assertEquals(new BigDecimal("40"), result.getRemainingQuoteAmount());
+        assertEquals(BigDecimal.ZERO, result.getTakerRemainingBaseQty());
+        assertEquals(new BigDecimal("40"), result.getTakerRemainingQuoteAmount());
     }
 
     @Test
@@ -205,12 +208,28 @@ class MatchResultEventsHelperTest {
     void appendErrorMarksSystemError() {
         helper.beginRequest(0L, 0L);  // error path 时不一定有 valid request 上下文
 
-        PlaceOrderResult err = helper.appendError(SystemErrorCodeEnum.SERIAL_NUM_NOT_CONTINUOUS, 999L);
+        OrderRejectResult err = helper.appendError(SystemErrorCodeEnum.SERIAL_NUM_NOT_CONTINUOUS, 999L);
 
         assertEquals(SystemTypeEnum.ERROR, err.getSystemType());
         assertEquals(SystemErrorCodeEnum.SERIAL_NUM_NOT_CONTINUOUS, err.getSystemErrorCode());
         assertEquals(999L, err.getRequestSerialNum());
         assertEquals(OrderStatusEnum.REJECTED, err.getOrderStatus());
+        assertEquals(ResultBizTypeEnum.ORDER_REJECT, err.getResultBizType());
+    }
+
+    @Test
+    void appendAmendProducesAmendOrderResult() {
+        helper.beginRequest(12L, 4000L);
+
+        MatchOrder order = makeOrder(60, "BTC_USDT", new BigDecimal("10"), new BigDecimal("5"));
+        order.updateFilledQuantity(new BigDecimal("2"));
+
+        AmendOrderResult result = helper.appendAmend(order);
+
+        assertEquals(ResultBizTypeEnum.AMEND_ORDER, result.getResultBizType());
+        assertEquals(60L, result.getOrderId());
+        assertEquals(OrderStatusEnum.PARTIALLY_FILLED, result.getOrderStatus());
+        assertEquals(new BigDecimal("3"), result.getRemainingBaseQty());
     }
 
     @Test

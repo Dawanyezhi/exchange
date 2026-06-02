@@ -21,7 +21,11 @@ public enum ResultBizTypeEnum {
     /** 下币 */
     SYMBOL_DOWN((byte) 5),
     /** 正常币对停止/开启交易 */
-    TRADE_SWITCH((byte) 6);
+    TRADE_SWITCH((byte) 6),
+    /** 改单结果 */
+    AMEND_ORDER((byte) 7),
+    /** 订单请求拒绝 */
+    ORDER_REJECT((byte) 8);
 
     private final byte code;
 

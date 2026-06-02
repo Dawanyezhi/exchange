@@ -83,6 +83,8 @@
             <validValue name="BAD_REQUEST_PARAM">2</validValue>
             <validValue name="SYMBOL_NOT_TRADING">3</validValue>
             <validValue name="DUPLICATE_ORDER">4</validValue>
+            <validValue name="ORDER_NOT_FOUND">5</validValue>
+            <validValue name="INVALID_AMEND">6</validValue>
         </enum>
 
         <!-- 业务类型 -->
@@ -93,6 +95,8 @@
             <validValue name="SYMBOL_UP">4</validValue>
             <validValue name="SYMBOL_DOWN">5</validValue>
             <validValue name="TRADE_SWITCH">6</validValue>
+            <validValue name="AMEND_ORDER">7</validValue>
+            <validValue name="ORDER_REJECT">8</validValue>
         </enum>
 
         <!-- 上下币操作 op: 1=上币 LIST, 2=下币 DELIST -->
@@ -180,21 +184,21 @@
 
     <!-- 撮合结果, resultBizType=MATCH -->
     <message name="MatchOrderResult" id="201" description="撮合成交结果">
-        <field name="header" id="1" type="resultCommonHeader"/>
-        <field name="orderId" id="2" type="uint64"/>
-        <field name="oppositeOrderId" id="3" type="uint64"/>
-        <field name="symbolCode" id="4" type="uint16"/>
-        <field name="orderStatus" id="5" type="OrderStatus"/>
-        <data name="symbolId" id="6" type="varStringEncoding"/>
-        <data name="tradePrice" id="7" type="varStringEncoding"/>
-        <data name="counterTradePrice" id="8" type="varStringEncoding"/>
-        <data name="tradeAmount" id="9" type="varStringEncoding"/>
-        <data name="counterTradeAmount" id="10" type="varStringEncoding"/>
-        <data name="remainingAmount" id="11" type="varStringEncoding"/>
-        <data name="tradeBaseQty" id="12" type="varStringEncoding"/>
-        <data name="tradeQuoteAmount" id="13" type="varStringEncoding"/>
-        <data name="remainingBaseQty" id="14" type="varStringEncoding"/>
-        <data name="remainingQuoteAmount" id="15" type="varStringEncoding"/>
+        <field name="header" id="1" type="resultCommonHeader" description="结果公共头"/>
+        <field name="tradeId" id="2" type="uint64" description="成交唯一编号，当前使用 resultSerialNum"/>
+        <field name="takerOrderId" id="3" type="uint64" description="主动吃单方订单号"/>
+        <field name="makerOrderId" id="4" type="uint64" description="被动挂单方订单号"/>
+        <field name="symbolCode" id="5" type="uint16" description="币对数字编码"/>
+        <field name="takerOrderStatus" id="6" type="OrderStatus" description="本笔成交后 taker 订单状态"/>
+        <field name="makerOrderStatus" id="7" type="OrderStatus" description="本笔成交后 maker 订单状态"/>
+        <data name="symbolId" id="8" type="varStringEncoding" description="币对标识"/>
+        <data name="tradePrice" id="9" type="varStringEncoding" description="本笔成交价格"/>
+        <data name="tradeBaseQty" id="10" type="varStringEncoding" description="本笔成交基础币数量"/>
+        <data name="tradeQuoteAmount" id="11" type="varStringEncoding" description="本笔成交计价币金额"/>
+        <data name="takerRemainingBaseQty" id="12" type="varStringEncoding" description="成交后 taker 剩余基础币数量"/>
+        <data name="takerRemainingQuoteAmount" id="13" type="varStringEncoding" description="成交后 taker 剩余计价币预算或目标"/>
+        <data name="makerRemainingBaseQty" id="14" type="varStringEncoding" description="成交后 maker 剩余基础币数量"/>
+        <data name="makerRemainingQuoteAmount" id="15" type="varStringEncoding" description="成交后 maker 剩余计价币金额"/>
     </message>
 
     <!-- 撤单结果, resultBizType=CANCEL -->
@@ -230,5 +234,29 @@
         <field name="symbolCode" id="2" type="uint16"/>
         <field name="switchOn" id="3" type="BooleanType"/>
         <data name="symbolId" id="4" type="varStringEncoding"/>
+    </message>
+
+    <!-- 改单结果, resultBizType=AMEND_ORDER -->
+    <message name="AmendOrderResult" id="205" description="改单结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="orderId" id="2" type="uint64"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="orderStatus" id="4" type="OrderStatus"/>
+        <data name="symbolId" id="5" type="varStringEncoding"/>
+        <data name="delegatePrice" id="6" type="varStringEncoding"/>
+        <data name="delegateCount" id="7" type="varStringEncoding"/>
+        <data name="remainingAmount" id="8" type="varStringEncoding"/>
+        <data name="remainingBaseQty" id="9" type="varStringEncoding"/>
+        <data name="remainingQuoteAmount" id="10" type="varStringEncoding"/>
+    </message>
+
+    <!-- 拒绝结果, resultBizType=ORDER_REJECT -->
+    <message name="OrderRejectResult" id="206" description="订单请求拒绝结果">
+        <field name="header" id="1" type="resultCommonHeader"/>
+        <field name="orderId" id="2" type="uint64"/>
+        <field name="symbolCode" id="3" type="uint16"/>
+        <field name="orderStatus" id="4" type="OrderStatus"/>
+        <data name="symbolId" id="5" type="varStringEncoding"/>
+        <data name="rejectReason" id="6" type="varStringEncoding"/>
     </message>
 </messageSchema>

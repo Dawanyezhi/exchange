@@ -1,4 +1,4 @@
-# Counter Module Guidelines
+# Counter 模块指南
 
 ## 项目概览
 
@@ -65,6 +65,7 @@ mvn -pl counter -am package -DskipTests
 
 ## 代码约定
 
+- 每次回答都必须使用中文，除非用户明确要求使用其他语言。
 - 数据面订单请求由 `OrderService` 分配 `serialNum`，通过 `RequestSerialNumGenerator` 保证递增。
 - 控制面上下币/开关交易请求不分配 `serialNum`，保持与 `SymbolService` 现有注释一致。
 - 请求类、枚举、SBE codec 来自 `common`，不要在本模块重复定义协议模型。
