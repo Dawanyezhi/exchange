@@ -7,6 +7,7 @@ import com.laser.exchange.matching.resultLog.ArchiveResultLogWriter;
 import com.laser.exchange.matching.snapshot.AeronImageSnapshotReader;
 import com.laser.exchange.matching.snapshot.AeronPublicationSnapshotWriter;
 import com.laser.exchange.matching.snapshot.SnapshotManager;
+import com.laser.exchange.matching.snapshot.SnapshotWriter;
 import com.laser.exchange.matching.validation.SerialNumValidator;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
@@ -137,7 +138,7 @@ public class MatchEngineClusteredService implements ClusteredService {
                 resultLogWriter.awaitLastOfferedRecorded();
             }
 
-            AeronPublicationSnapshotWriter writer = new AeronPublicationSnapshotWriter(snapshotPublication);
+            SnapshotWriter writer = createSnapshotWriter(snapshotPublication);
             int entryCount = snapshotManager.takeSnapshot(
                     matchEngine.getMatchEngineState(),
                     maxReq,
@@ -150,6 +151,10 @@ public class MatchEngineClusteredService implements ClusteredService {
             log.error("onTakeSnapshot failed", e);
             throw e;
         }
+    }
+
+    SnapshotWriter createSnapshotWriter(ExclusivePublication snapshotPublication) {
+        return new AeronPublicationSnapshotWriter(snapshotPublication);
     }
 
     @Override
