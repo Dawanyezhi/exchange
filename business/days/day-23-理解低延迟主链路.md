@@ -143,6 +143,7 @@ flowchart LR
     E -. replay .-> CL
     E -. replay .-> MD
 ```
+![img.png](assets/低延迟交易链路图.png)
 
 ## 5. 为什么 journalling 可能位于性能关键路径
 

@@ -58,6 +58,7 @@ flowchart TD
     I -. 发现差异 .-> K[异常修复]
     K --> G
 ```
+![img.png](assets/风控与账务闭环图.png)
 
 这个闭环说明：
 

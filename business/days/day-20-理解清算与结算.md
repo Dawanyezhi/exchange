@@ -15,6 +15,9 @@
 参考资料：
 
 - CME Mark-to-Market：https://www.cmegroup.com/education/courses/introduction-to-futures/mark-to-market.html
+- OKX Trading Fee Rules FAQ：https://www.okx.com/en-us/help/trading-fee-rules-faq
+- OKX Spot Fee Payment Option：https://www.okx.com/help/okx-to-introduce-spot-fee-payment-option-in-quote-currency
+- LeveX Basic Trading：https://levex.com/en/support/basic-trading
 - Day 18：账户、持仓与可用资金：`business/days/day-18-理解账户持仓与可用资金.md`
 - Day 19：三本账：`business/days/day-19-理解三本账.md`
 
@@ -101,6 +104,7 @@ flowchart TD
     G --> H[Settlement 周期结算]
     H --> I[对账 / 报表 / 审计]
 ```
+![img.png](assets/成交后到账务结算流程图.png)
 
 ## 4. 现货清算示例
 
@@ -111,15 +115,25 @@ BUYER 买入 0.5 BTC
 SELLER 卖出 0.5 BTC
 price = 30000 USDT
 quoteAmount = 15000 USDT
-buyerFee = 15 USDT
+feeRate = 0.1%
+buyerFee = 0.0005 BTC
 sellerFee = 15 USDT
 ```
+
+这里使用现货市场常见的“按所得物扣费”模型：
+
+- 买方买入 BTC，所得物是 BTC，所以买方手续费从 BTC 中扣。
+- 卖方卖出 BTC，所得物是 USDT，所以卖方手续费从 USDT 中扣。
 
 买方清算：
 
 ```text
-USDT frozen -15015
-BTC available +0.5
+grossBaseQty = 0.5 BTC
+buyerFee = 0.5 * 0.1% = 0.0005 BTC
+netBaseQty = 0.4995 BTC
+
+USDT frozen -15000
+BTC available +0.4995
 ```
 
 卖方清算：
@@ -132,10 +146,29 @@ USDT available +14985
 手续费账户：
 
 ```text
-USDT fee income +30
+BTC fee income +0.0005
+USDT fee income +15
 ```
 
 这个过程需要写账本流水，不能只改余额表。
+
+生产系统里不要把“手续费一定从某个币种扣”写死在撮合或清算代码里，而应该放到手续费规则中：
+
+```text
+feeCurrencyRule = RECEIVED_ASSET
+feeRate = 根据 symbol、maker/taker、VIP、账户类型、活动规则确定
+feeCurrency = 根据订单方向和 feeCurrencyRule 推导
+feeAmount = 根据成交数量、成交金额、费率和币种精度计算
+```
+
+以 BTC-USDT 为例，`RECEIVED_ASSET` 规则下：
+
+| 订单方向 | 用户付出 | 用户所得 | 手续费币种 | 清算后的净到账 |
+| --- | --- | --- | --- | --- |
+| BUY | USDT | BTC | BTC | `grossBaseQty - baseFee` |
+| SELL | BTC | USDT | USDT | `grossQuoteAmount - quoteFee` |
+
+OKX 官方文档中，BTC-USDT 现货买入示例是买入 1 BTC 后从 BTC 中扣费，用户实际收到扣费后的 BTC；卖出示例是收到 USDT 后从 USDT 中扣费。OKX 后续也提供了现货买单手续费改为从花费的 quote 币种扣除的选项，因此生产系统应把手续费币种设计成可配置规则。LeveX 官方帮助中心能确认现货 maker/taker 费率按订单价值计算，但公开页面没有明确说明现货手续费一定从哪个币种扣，不能只根据费率页面反推出固定扣费币种。
 
 ## 5. 冻结释放
 

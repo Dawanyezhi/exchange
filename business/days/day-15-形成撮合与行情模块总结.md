@@ -98,10 +98,53 @@ flowchart LR
 | `price` | 撮合比较和价格档 | 深度档位和成交价格 |
 | `quantity` | 可成交数量和剩余数量 | 档位数量、成交数量 |
 | `side` | 买盘或卖盘 | bid / ask |
-| `sequence` | 撮合命令和事件顺序 | 行情增量顺序 |
+| `sequence` | 撮合命令和事件顺序，例如 `resultSerialNum`、`matchSeq` | 行情增量顺序通常应使用单交易对连续的 `symbolSeq` / `bookSeq` |
 | `tradeId` | 成交唯一标识 | trade feed、ticker、K 线来源 |
 | `snapshot` | 订单簿状态快照 | 客户端初始化本地簿 |
 | `incremental` | 状态变更事件 | 客户端实时更新本地簿 |
+
+这里要特别区分 `resultSerialNum` 和行情增量序号。
+
+`resultSerialNum` 适合表示撮合结果事件在内部全局结果流中的顺序，适合用于：
+
+```text
+审计
+回放
+下游消费幂等
+内部问题排查
+```
+
+但它不适合直接作为单个交易对的行情增量连续序号。原因是行情客户端通常按 `symbol` 订阅，例如只订阅 `BTC-USDT`。如果全局结果流是：
+
+```text
+resultSerialNum = 1001 BTC-USDT update
+resultSerialNum = 1002 ETH-USDT update
+resultSerialNum = 1003 SOL-USDT update
+resultSerialNum = 1004 BTC-USDT update
+```
+
+只订阅 `BTC-USDT` 的客户端会看到：
+
+```text
+1001, 1004
+```
+
+这并不表示 BTC 行情缺了 `1002` 和 `1003`，因为它们属于其他交易对。
+
+因此生产上更推荐：
+
+```text
+DepthUpdate:
+  symbol = BTC-USDT
+  bookSeq = 20001
+  prevBookSeq = 20000
+  sourceResultSerialNum = 1004
+```
+
+其中：
+
+- `bookSeq` / `symbolSeq`：给外部行情客户端检查单个交易对增量是否连续。
+- `sourceResultSerialNum`：给内部系统追踪这条行情来自哪条撮合结果事件。
 
 ## 6. 最小生产实践原则
 
@@ -156,6 +199,106 @@ flowchart LR
 6. 行情系统如何生成 trade、depth、ticker
 7. 客户端如何用 snapshot + incremental 维护本地订单簿
 ```
+
+### 7.1 参考生产实践流程
+
+生产系统里，“订单消息变成行情消息”可以按下面流程设计：
+
+```text
+1. Client 发送 NewOrder
+   - 携带 clientOrderId、symbol、side、orderType、price、qty、timeInForce
+   - clientOrderId 用于客户端重试幂等
+
+2. Gateway / Session 接收请求
+   - 鉴权、限流、基础参数校验
+   - 检查会话序号、心跳、重放窗口
+   - 转换为内部 PlaceOrderCommand
+
+3. OMS 创建订单请求记录
+   - 生成 orderId
+   - 校验 accountId + clientOrderId 幂等
+   - 建立订单初始状态 RECEIVED / PENDING_RISK
+   - 记录订单请求事实，准备进入风控
+   - 此时订单还没有进入撮合，也不是可成交挂单
+
+4. OMS 调用 Risk / Account 做前置风控
+   - 校验 symbol 状态、tickSize、lotSize、minNotional
+   - 校验余额、持仓、权限、限频、价格保护
+   - Account 冻结 quote 或 base
+   - Risk / Account 返回 PASS + holdId，或 REJECT + reason
+   - Risk 不直接成为订单路由中心
+
+5. OMS 根据风控结果推进订单
+   - 如果 REJECT:
+       status = REJECTED
+       生成拒单回报
+       流程结束
+   - 如果 PASS:
+       status = ACCEPTED / SENT_TO_MATCHING
+       OMS 发送 PlaceOrderCommand 给 Matching
+       订单进入撮合前的状态变化要可恢复、可审计
+
+6. Matching 按 symbol 定序处理
+   - 同一 symbol 的命令严格有序
+   - 订单进入对应 OrderBook
+   - 按价格时间优先撮合
+   - 生成 matchId、tradePrice、tradeBaseQty、tradeQuoteAmount
+   - 更新 maker / taker remainingQty 和订单簿
+   - 生成 resultSerialNum 和 symbolSeq / bookSeq
+
+7. Matching 输出撮合事件
+   - OrderAccepted / OrderMatched / OrderCanceled
+   - BookUpdated
+   - 事件写入 Match Event Log
+   - 事件通过可靠总线或发布器分发给下游
+
+8. OMS 消费撮合事件
+   - 根据 orderId 和事件顺序更新订单状态
+   - PARTIALLY_FILLED / FILLED / CANCELED
+   - 更新累计成交数量、均价、剩余数量
+   - 生成用户订单回报和订单查询视图
+
+9. Clearing 消费成交事件
+   - 按 matchId 幂等处理
+   - 计算买卖双方资产变化
+   - 计算手续费
+   - 计算冻结扣减和多余冻结释放
+   - 输出账本写入请求
+
+10. MarketData 消费撮合事件和订单簿事件
+   - 根据 MatchEvent 生成 Trade Feed
+   - 根据 BookUpdated 生成 Depth Incremental
+   - 根据最新成交和 24h 窗口生成 Ticker
+   - 根据成交聚合生成 K Line
+   - 对每个 symbol 维护独立 bookSeq
+
+11. MarketData 发布行情
+    - Trade:
+        tradeId / matchId, price, qty, side, timestamp
+    - Depth:
+        symbol, prevBookSeq, bookSeq, bids/asks delta
+    - Ticker:
+        lastPrice, bestBid, bestAsk, 24hVolume, 24hChange
+    - Snapshot:
+        symbol, snapshotSeq, bids, asks
+
+12. Client 重建本地订单簿
+    - 先订阅增量并缓存
+    - 拉取 snapshot
+    - 丢弃 seq <= snapshotSeq 的增量
+    - 从 snapshotSeq + 1 开始应用增量
+    - 检查 prevBookSeq / bookSeq 是否连续
+    - 如果缺口，重新同步或请求补增量
+```
+
+这个流程里的关键原则是：
+
+- 撮合是订单簿事实源。
+- 行情系统消费撮合事件，不反向影响撮合。
+- `resultSerialNum` 用于内部事件回放和审计。
+- `symbolSeq` / `bookSeq` 用于单交易对行情连续性。
+- OMS 是订单生命周期主控，Risk / Account 返回准入和冻结结果，不直接替代 OMS 推送订单给撮合。
+- OMS、Clearing、MarketData 都消费同一份撮合事实，但各自维护自己的读模型。
 
 ## 8. 复盘问题
 

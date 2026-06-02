@@ -62,6 +62,7 @@ flowchart TD
     Risk -. 价格 / 数量 / 余额 / 限仓 .-> Risk
     Market -. 熔断 / 暂停 / 价格带 .-> Market
 ```
+![img.png](assets/风控分层图.png)
 
 ## 4. 会话级风控
 
@@ -180,6 +181,69 @@ Account A 在 BTC-USDT-SWAP 最大允许持仓 = 10 BTC
 ```
 
 限仓不能只看当前成交结果，还要考虑 open orders 的潜在成交风险。
+
+### 7.1 合约仓位风控常用字段
+
+在合约、永续、杠杆系统里，账户级风控不仅看余额，还要看仓位风险。
+
+一个合约仓位通常包含：
+
+```text
+symbol
+side
+positionSize
+entryPrice
+markPrice
+unrealizedPnl
+margin
+liquidationPrice
+leverage
+maintenanceMargin
+```
+
+字段含义：
+
+| 字段 | 含义 | 风控用途 |
+| --- | --- | --- |
+| `symbol` | 合约标的，例如 `BTC-USDT-SWAP` | 区分不同交易对、合约类型、结算币和风险限额 |
+| `side` | 仓位方向，`LONG` 多头或 `SHORT` 空头 | 判断价格上涨或下跌时仓位是盈利还是亏损 |
+| `positionSize` | 持仓规模，可能是 base 数量或合约张数 | 计算风险敞口、限仓、保证金占用和盈亏 |
+| `entryPrice` | 持仓均价 / 开仓均价 | 结合 mark price 计算未实现盈亏 |
+| `markPrice` | 标记价格 | 用于计算未实现盈亏、保证金率和强平风险，通常比 lastPrice 更适合风控 |
+| `unrealizedPnl` | 未实现盈亏 | 尚未平仓但按 mark price 估算出的浮动盈亏，影响账户权益 |
+| `margin` | 当前仓位占用或分配的保证金 | 判断仓位是否满足初始保证金和维持保证金要求 |
+| `liquidationPrice` | 预估强平价格 | 当 mark price 接近该价格时，账户可能触发强平 |
+| `leverage` | 杠杆倍数 | 影响保证金要求和风险敞口上限 |
+| `maintenanceMargin` | 维持保证金 | 持仓继续存在所需的最低保证金要求 |
+
+简化例子：
+
+```text
+symbol = BTC-USDT-SWAP
+side = LONG
+positionSize = 1 BTC
+entryPrice = 60000
+markPrice = 59000
+unrealizedPnl = -1000 USDT
+margin = 6000 USDT
+liquidationPrice = 54500
+leverage = 10x
+```
+
+这表示用户持有 `1 BTC` 多头，开仓均价是 `60000`，当前标记价格是 `59000`，所以有 `1000 USDT` 浮亏。风控会根据账户权益、保证金、维持保证金和强平价格判断是否还能继续开仓、是否需要限制下单，或者是否接近强平。
+
+合约风控不能只看订单本身，还要计算：
+
+```text
+当前持仓
+未成交挂单可能增加的仓位
+账户可用保证金
+未实现盈亏
+风险限额
+维持保证金要求
+```
+
+这也是为什么限仓和保证金风控通常属于账户级、产品级和市场级共同约束。
 
 ## 8. 市场级风控
 

@@ -74,6 +74,38 @@ margin = 3000 USDT
 liquidationPrice = 54500
 ```
 
+这些字段的含义：
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `symbol` | 合约标的 | 表示这笔仓位属于哪个产品，例如 `BTC-USDT-SWAP`。不能只写 `BTC`，因为现货、永续、交割合约、不同 quote 和不同结算币的风险完全不同。 |
+| `side` | 仓位方向 | `LONG` 表示多头，价格上涨盈利；`SHORT` 表示空头，价格下跌盈利。 |
+| `positionSize` | 持仓规模 | 表示当前仓位大小，可能是 base 数量，例如 `0.5 BTC`，也可能是合约张数，具体取决于产品定义。 |
+| `entryPrice` | 持仓均价 / 开仓均价 | 当前仓位的平均建仓价格，通常用于计算未实现盈亏。加仓可能改变均价，减仓通常减少仓位数量。 |
+| `markPrice` | 标记价格 | 用于估值、保证金和强平判断的价格。它通常不是最新成交价，而是交易所按指数价格、盘口、资金费率或合理基差计算出的风控价格。 |
+| `unrealizedPnl` | 未实现盈亏 | 仓位还没有平仓时，按 `markPrice` 估算出的浮动盈亏。多头可简化为 `(markPrice - entryPrice) * positionSize`。 |
+| `margin` | 保证金 | 为维持杠杆仓位而占用的资产。逐仓模式下保证金绑定到单个仓位；全仓模式下账户权益可能共同承担风险。 |
+| `liquidationPrice` | 预估强平价格 | 当 `markPrice` 接近或触及该价格，账户权益或仓位保证金可能不足以满足维持保证金要求，从而触发强平。 |
+
+以上面的仓位为例：
+
+```text
+symbol = BTC-USDT-SWAP
+side = LONG
+positionSize = 0.5 BTC
+entryPrice = 60000
+markPrice = 61000
+```
+
+可以简化计算：
+
+```text
+unrealizedPnl = (61000 - 60000) * 0.5
+              = 500 USDT
+```
+
+这 `500 USDT` 是浮盈，还没有真正落到账本里。只有平仓、结算或规则触发盈亏结转后，才会变成已实现盈亏或账户余额变化。
+
 区别可以这样理解：
 
 ```text
@@ -102,6 +134,7 @@ flowchart TD
     PnL --> Realized[Realized PnL 已实现盈亏]
     PnL --> Unrealized[Unrealized PnL 未实现盈亏]
 ```
+![img.png](assets/账户、持仓、资金关系图.png)
 
 ## 5. 可用资金为什么重要
 

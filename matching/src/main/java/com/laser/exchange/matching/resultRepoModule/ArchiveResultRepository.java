@@ -52,8 +52,7 @@ public class ArchiveResultRepository implements ResultRepository {
 
     private long maxResultSerialNum = 0L;
 
-    public ArchiveResultRepository(Aeron aeron, AeronArchive aeronArchive,
-                                   String channel, int streamId) {
+    public ArchiveResultRepository(Aeron aeron, AeronArchive aeronArchive, String channel, int streamId) {
         this.aeron = aeron;
         this.aeronArchive = aeronArchive;
         this.channel = channel;

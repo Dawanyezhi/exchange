@@ -163,6 +163,7 @@ flowchart LR
     Fill -. fee base .-> Fee[手续费账]
     Fee --> Ledger
 ```
+![img.png](assets/三本账勾稽关系图.png)
 
 核心勾稽关系：
 
