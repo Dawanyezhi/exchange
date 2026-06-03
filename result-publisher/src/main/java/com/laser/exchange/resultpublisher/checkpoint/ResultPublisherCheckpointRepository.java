@@ -14,9 +14,9 @@ public class ResultPublisherCheckpointRepository {
         this.mapper = mapper;
     }
 
-    public Optional<ResultPublisherCheckpointEntity> findByResultStream(String resultChannel, int resultStreamId) {
+    public Optional<ResultPublisherCheckpointEntity> findLatestByResultStream(String resultChannel, int resultStreamId) {
         Objects.requireNonNull(resultChannel, "resultChannel");
-        return Optional.ofNullable(mapper.selectByResultStream(resultChannel, resultStreamId));
+        return Optional.ofNullable(mapper.selectLatestByResultStream(resultChannel, resultStreamId));
     }
 
     public int insert(ResultPublisherCheckpointEntity checkpoint) {

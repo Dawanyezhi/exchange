@@ -2,11 +2,13 @@ package com.laser.exchange.resultpublisher.checkpoint;
 
 import com.laser.exchange.resultpublisher.archive.ResultLogEntry;
 import com.laser.exchange.resultpublisher.config.ResultPublisherProperties;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 import java.util.Optional;
 
+@Slf4j
 @Component
 public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint {
 
@@ -44,25 +46,29 @@ public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint 
                 properties.getResultStreamId(),
                 entry
         );
-        if (current.getId() == null) {
-            int inserted = repository.insert(next);
-            if (inserted != 1) {
-                throw new IllegalStateException("failed to insert result-publisher checkpoint");
-            }
-            current = next;
+        if (current.getId() == null || !Objects.equals(current.getRecordingId(), next.getRecordingId())) {
+            insert(next);
             return;
         }
 
         long expectedVersion = current.getVersion();
         int updated = repository.updateIfVersionMatchesAndProgresses(next, expectedVersion);
         if (updated != 1) {
-            current = repository.findByResultStream(properties.getResultChannel(), properties.getResultStreamId())
+            current = repository.findLatestByResultStream(properties.getResultChannel(), properties.getResultStreamId())
                     .orElse(current);
-            throw new IllegalStateException("failed to update result-publisher checkpoint, version=" + expectedVersion);
+            log.error("failed to update result-publisher checkpoint, error expectedVersion:{}", expectedVersion);
         }
 
         next.setId(current.getId());
         next.setVersion(expectedVersion + 1);
+        current = next;
+    }
+
+    private void insert(ResultPublisherCheckpointEntity next) {
+        int inserted = repository.insert(next);
+        if (inserted != 1) {
+            throw new IllegalStateException("failed to insert result-publisher checkpoint");
+        }
         current = next;
     }
 
@@ -73,7 +79,7 @@ public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint 
     }
 
     private ResultPublisherCheckpointEntity loadOrInitialCheckpoint() {
-        Optional<ResultPublisherCheckpointEntity> checkpoint = repository.findByResultStream(
+        Optional<ResultPublisherCheckpointEntity> checkpoint = repository.findLatestByResultStream(
                 properties.getResultChannel(),
                 properties.getResultStreamId()
         );

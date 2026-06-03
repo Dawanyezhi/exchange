@@ -28,9 +28,11 @@ public interface ResultPublisherCheckpointMapper extends BaseMapper<ResultPublis
             FROM result_publisher_checkpoint
             WHERE result_channel = #{resultChannel}
               AND result_stream_id = #{resultStreamId}
+            ORDER BY recording_id DESC
+            LIMIT 1
             """)
-    ResultPublisherCheckpointEntity selectByResultStream(@Param("resultChannel") String resultChannel,
-                                                         @Param("resultStreamId") int resultStreamId);
+    ResultPublisherCheckpointEntity selectLatestByResultStream(@Param("resultChannel") String resultChannel,
+                                                               @Param("resultStreamId") int resultStreamId);
 
     @Insert("""
             INSERT INTO result_publisher_checkpoint (
@@ -81,6 +83,7 @@ public interface ResultPublisherCheckpointMapper extends BaseMapper<ResultPublis
                 version = version + 1
             WHERE result_channel = #{checkpoint.resultChannel}
               AND result_stream_id = #{checkpoint.resultStreamId}
+              AND recording_id = #{checkpoint.recordingId}
               AND version = #{expectedVersion}
               AND (
                   #{checkpoint.lastResultSerialNum} > last_result_serial_num

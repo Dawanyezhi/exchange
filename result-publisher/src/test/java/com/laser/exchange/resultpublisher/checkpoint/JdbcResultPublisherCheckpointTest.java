@@ -74,6 +74,23 @@ class JdbcResultPublisherCheckpointTest {
         assertEquals(5L, checkpoint.lastResultSerialNum());
     }
 
+    @Test
+    @DisplayName("recordingId 变化时插入新的 checkpoint 记录")
+    void insertsNewCheckpointWhenRecordingIdChanges() {
+        ResultPublisherProperties properties = properties();
+        FakeResultPublisherCheckpointRepository repository = new FakeResultPublisherCheckpointRepository();
+        repository.current = entity(7L, 512L, 5L, 2L);
+        JdbcResultPublisherCheckpoint checkpoint = new JdbcResultPublisherCheckpoint(properties, repository);
+
+        checkpoint.markPublished(resultLogEntry(8L, 0L, 128L, 2L));
+
+        assertEquals(128L, checkpoint.nextReplayPosition());
+        assertEquals(8L, checkpoint.lastResultSerialNum());
+        assertEquals(1, repository.insertCount);
+        assertEquals(0, repository.updateCount);
+        assertEquals(2L, repository.current.getRecordingId());
+    }
+
     private static ResultPublisherProperties properties() {
         ResultPublisherProperties properties = new ResultPublisherProperties();
         properties.setResultChannel("aeron:ipc");
@@ -89,7 +106,7 @@ class JdbcResultPublisherCheckpointTest {
         entity.setId(id);
         entity.setResultChannel("aeron:ipc");
         entity.setResultStreamId(1001);
-        entity.setRecordingId(1L);
+        entity.setRecordingId(7L);
         entity.setNextReplayPosition(nextReplayPosition);
         entity.setLastResultSerialNum(lastResultSerialNum);
         entity.setLastStartPosition(Math.max(0L, nextReplayPosition - 128L));
@@ -102,9 +119,16 @@ class JdbcResultPublisherCheckpointTest {
     }
 
     private static ResultLogEntry resultLogEntry(long resultSerialNum, long startPosition, long endPosition) {
+        return resultLogEntry(resultSerialNum, startPosition, endPosition, 7L);
+    }
+
+    private static ResultLogEntry resultLogEntry(long resultSerialNum,
+                                                 long startPosition,
+                                                 long endPosition,
+                                                 long recordingId) {
         return new ResultLogEntry(
                 resultSerialNum,
-                7L,
+                recordingId,
                 startPosition,
                 endPosition,
                 1,
@@ -133,7 +157,7 @@ class JdbcResultPublisherCheckpointTest {
         }
 
         @Override
-        public Optional<ResultPublisherCheckpointEntity> findByResultStream(String resultChannel, int resultStreamId) {
+        public Optional<ResultPublisherCheckpointEntity> findLatestByResultStream(String resultChannel, int resultStreamId) {
             return Optional.ofNullable(current);
         }
 

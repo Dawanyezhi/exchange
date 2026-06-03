@@ -11,6 +11,7 @@ import io.aeron.archive.client.AeronArchive;
 import org.agrona.CloseHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
@@ -38,7 +39,7 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
 
     public ArchiveResultConsumerService(ResultPublisherProperties properties,
                                         ResultPublisher publisher,
-                                        ResultPublisherCheckpoint checkpoint) {
+                                        @Qualifier("jdbcResultPublisherCheckpoint") ResultPublisherCheckpoint checkpoint) {
         this.properties = properties;
         this.publisher = publisher;
         this.checkpoint = checkpoint;
@@ -60,6 +61,8 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
         workerThread = new Thread(this::consumeLoop, "result-publisher-archive-consumer");
         workerThread.setDaemon(true);
         workerThread.start();
+
+        // 等待连接
         awaitStartup();
         log.info("[ArchiveResultConsumerService] started");
     }

@@ -52,6 +52,7 @@ public class ArchiveResultLogReader {
                                          ResultLogScanState state,
                                          ResultLogEntryHandler handler,
                                          BooleanSupplier running) {
+        // 获取结果数据流的最新录制ID
         long recordingId = findLatestResultRecordingId();
 
         // 回放结果数据
