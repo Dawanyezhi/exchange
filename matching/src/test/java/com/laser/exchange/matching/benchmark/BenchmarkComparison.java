@@ -31,9 +31,31 @@ public class BenchmarkComparison {
     private static final int MEASURE_OPS = 500_000;
     private static final String SYMBOL = "SPOT_BTC_USDT";
 
-    record BenchResult(String scenario, String version, int ops, long nanos) {
-        double throughputMOps() { return ops * 1000.0 / nanos; }
-        double latencyNs() { return (double) nanos / ops; }
+    static final class BenchResult {
+
+        private final String scenario;
+        private final String version;
+        private final int ops;
+        private final long nanos;
+
+        BenchResult(String scenario, String version, int ops, long nanos) {
+            this.scenario = scenario;
+            this.version = version;
+            this.ops = ops;
+            this.nanos = nanos;
+        }
+
+        String scenario() {
+            return scenario;
+        }
+
+        double throughputMOps() {
+            return ops * 1000.0 / nanos;
+        }
+
+        double latencyNs() {
+            return (double) nanos / ops;
+        }
     }
 
     public static void main(String[] args) {

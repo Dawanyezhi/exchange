@@ -122,25 +122,61 @@ public class MatchEngineStressTest {
      *   <li>吞吐量 = totalOps / sumOfLatencies（纯 placeOrder 调用时间）</li>
      * </ul>
      *
-     * @param name         场景名称
-     * @param opsPerEngine 每次引擎重建前可执行的操作数
-     * @param action       场景操作
      */
-    record ScenarioConfig(
-            String name,
-            int opsPerEngine,
-            Consumer<MatchEngine> action
-    ) {}
+    static final class ScenarioConfig {
+
+        private final String name;
+        private final int opsPerEngine;
+        private final Consumer<MatchEngine> action;
+
+        ScenarioConfig(String name, int opsPerEngine, Consumer<MatchEngine> action) {
+            this.name = name;
+            this.opsPerEngine = opsPerEngine;
+            this.action = action;
+        }
+
+        String name() {
+            return name;
+        }
+
+        int opsPerEngine() {
+            return opsPerEngine;
+        }
+
+        Consumer<MatchEngine> action() {
+            return action;
+        }
+    }
 
     /**
      * 单轮测量结果。
      */
-    record RoundMetric(
-            int totalOps,
-            long wallClockNanos,
-            long[] latencySamples,
-            int sampleCount
-    ) {
+    static final class RoundMetric {
+
+        private final int totalOps;
+        private final long wallClockNanos;
+        private final long[] latencySamples;
+        private final int sampleCount;
+
+        RoundMetric(int totalOps, long wallClockNanos, long[] latencySamples, int sampleCount) {
+            this.totalOps = totalOps;
+            this.wallClockNanos = wallClockNanos;
+            this.latencySamples = latencySamples;
+            this.sampleCount = sampleCount;
+        }
+
+        int totalOps() {
+            return totalOps;
+        }
+
+        long[] latencySamples() {
+            return latencySamples;
+        }
+
+        int sampleCount() {
+            return sampleCount;
+        }
+
         double throughputOpsPerSec() {
             return totalOps * 1_000_000_000.0 / wallClockNanos;
         }
@@ -149,11 +185,26 @@ public class MatchEngineStressTest {
     /**
      * 场景测量结果。
      */
-    record ScenarioResult(
-            String name,
-            List<RoundMetric> rounds,
-            LatencyStats mergedStats
-    ) {
+    static final class ScenarioResult {
+
+        private final String name;
+        private final List<RoundMetric> rounds;
+        private final LatencyStats mergedStats;
+
+        ScenarioResult(String name, List<RoundMetric> rounds, LatencyStats mergedStats) {
+            this.name = name;
+            this.rounds = rounds;
+            this.mergedStats = mergedStats;
+        }
+
+        String name() {
+            return name;
+        }
+
+        LatencyStats mergedStats() {
+            return mergedStats;
+        }
+
         double avgThroughput() {
             return rounds.stream()
                     .mapToDouble(RoundMetric::throughputOpsPerSec)
