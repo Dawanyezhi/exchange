@@ -53,6 +53,8 @@ public class ArchiveResultLogReader {
                                          ResultLogEntryHandler handler,
                                          BooleanSupplier running) {
         long recordingId = findLatestResultRecordingId();
+
+        // 回放结果数据
         replay(recordingId, position, AeronArchive.REPLAY_ALL_AND_FOLLOW, new ResultLogScanner(state, handler), running);
         return state;
     }
@@ -70,6 +72,8 @@ public class ArchiveResultLogReader {
                 config.replayStreamId())) {
             // 自动解决拆包问题
             FragmentHandler handler = new FragmentAssembler(new DecodingFragmentHandler(recordingId, scanner));
+
+            // 持续拉取撮合结果
             pollUntilEndOfReplay(subscription, handler, running, length == AeronArchive.REPLAY_ALL_AND_FOLLOW);
         }
     }

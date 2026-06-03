@@ -29,6 +29,7 @@
         <aeron.version>1.49.3</aeron.version>
         <agrona.version>2.3.0</agrona.version>
         <sbe-tool.version>1.36.2</sbe-tool.version>
+        <mybatis-plus.version>3.5.16</mybatis-plus.version>
 
         <grpc.version>1.60.0</grpc.version>
         <protobuf.version>3.25.1</protobuf.version>

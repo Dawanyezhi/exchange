@@ -20,7 +20,7 @@ class InMemoryResultPublisherCheckpointTest {
         assertEquals(128L, checkpoint.nextReplayPosition());
         assertEquals(0L, checkpoint.lastResultSerialNum());
 
-        checkpoint.markPublished(new ResultLogEntry(
+        checkpoint.markPublishedInMemory(new ResultLogEntry(
                 3L,
                 7L,
                 256L,

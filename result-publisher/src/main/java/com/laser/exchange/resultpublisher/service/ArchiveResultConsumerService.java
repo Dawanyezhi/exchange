@@ -149,9 +149,9 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
         return AeronArchive.connect(context);
     }
 
-    private void publishAndCheckpoint(ResultLogEntry entry) {
+    void publishAndCheckpoint(ResultLogEntry entry) {
         publisher.publish(entry);
-        checkpoint.markPublished(entry);
+        checkpoint.markPublishedInMemory(entry);
     }
 
     private void awaitStartup() {

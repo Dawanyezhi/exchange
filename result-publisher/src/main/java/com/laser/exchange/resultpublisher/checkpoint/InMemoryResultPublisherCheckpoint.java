@@ -26,7 +26,7 @@ public class InMemoryResultPublisherCheckpoint implements ResultPublisherCheckpo
     }
 
     @Override
-    public synchronized void markPublished(ResultLogEntry entry) {
+    public synchronized void markPublishedInMemory(ResultLogEntry entry) {
         nextReplayPosition = entry.endPosition();
         lastResultSerialNum = entry.resultSerialNum();
     }
