@@ -21,11 +21,13 @@ class JdbcResultPublisherCheckpointTest {
         FakeResultPublisherCheckpointRepository repository = new FakeResultPublisherCheckpointRepository();
         JdbcResultPublisherCheckpoint checkpoint = new JdbcResultPublisherCheckpoint(properties, repository);
 
+        assertEquals(-1L, checkpoint.recordingId());
         assertEquals(128L, checkpoint.nextReplayPosition());
         assertEquals(0L, checkpoint.lastResultSerialNum());
 
         checkpoint.markPublished(resultLogEntry(3L, 256L, 384L));
 
+        assertEquals(7L, checkpoint.recordingId());
         assertEquals(384L, checkpoint.nextReplayPosition());
         assertEquals(3L, checkpoint.lastResultSerialNum());
         assertEquals(1, repository.insertCount);
@@ -42,11 +44,13 @@ class JdbcResultPublisherCheckpointTest {
         repository.current = entity(7L, 512L, 5L, 2L);
         JdbcResultPublisherCheckpoint checkpoint = new JdbcResultPublisherCheckpoint(properties, repository);
 
+        assertEquals(7L, checkpoint.recordingId());
         assertEquals(512L, checkpoint.nextReplayPosition());
         assertEquals(5L, checkpoint.lastResultSerialNum());
 
         checkpoint.markPublished(resultLogEntry(6L, 512L, 640L));
 
+        assertEquals(7L, checkpoint.recordingId());
         assertEquals(640L, checkpoint.nextReplayPosition());
         assertEquals(6L, checkpoint.lastResultSerialNum());
         assertEquals(0, repository.insertCount);
@@ -70,6 +74,7 @@ class JdbcResultPublisherCheckpointTest {
         );
 
         assertEquals("failed to update result-publisher checkpoint, version=2", exception.getMessage());
+        assertEquals(7L, checkpoint.recordingId());
         assertEquals(512L, checkpoint.nextReplayPosition());
         assertEquals(5L, checkpoint.lastResultSerialNum());
     }
@@ -84,6 +89,7 @@ class JdbcResultPublisherCheckpointTest {
 
         checkpoint.markPublished(resultLogEntry(8L, 0L, 128L, 2L));
 
+        assertEquals(2L, checkpoint.recordingId());
         assertEquals(128L, checkpoint.nextReplayPosition());
         assertEquals(8L, checkpoint.lastResultSerialNum());
         assertEquals(1, repository.insertCount);

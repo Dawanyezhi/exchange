@@ -40,6 +40,8 @@ public class ResultLogScanner {
 
         if (serialNum == last + 1) {
             state.accept(entry);
+
+            // 处理消息
             handler.onEntry(entry);
             return;
         }

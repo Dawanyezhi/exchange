@@ -48,13 +48,11 @@ public class ArchiveResultLogReader {
         return recordingId;
     }
 
-    public ResultLogScanState followFrom(long position,
+    public ResultLogScanState followFrom(long recordingId,
+                                         long position,
                                          ResultLogScanState state,
                                          ResultLogEntryHandler handler,
                                          BooleanSupplier running) {
-        // 获取结果数据流的最新录制ID
-        long recordingId = findLatestResultRecordingId();
-
         // 回放结果数据
         replay(recordingId, position, AeronArchive.REPLAY_ALL_AND_FOLLOW, new ResultLogScanner(state, handler), running);
         return state;

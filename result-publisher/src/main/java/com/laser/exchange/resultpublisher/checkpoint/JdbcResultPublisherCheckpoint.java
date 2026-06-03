@@ -12,6 +12,8 @@ import java.util.Optional;
 @Component
 public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint {
 
+    private static final long INITIAL_RECORDING_ID = -1L;
+
     private final ResultPublisherProperties properties;
 
     private final ResultPublisherCheckpointRepository repository;
@@ -22,6 +24,12 @@ public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint 
                                          ResultPublisherCheckpointRepository repository) {
         this.properties = properties;
         this.repository = repository;
+    }
+
+    @Override
+    public synchronized long recordingId() {
+        ensureLoaded();
+        return current.getRecordingId();
     }
 
     @Override
@@ -90,7 +98,7 @@ public class JdbcResultPublisherCheckpoint implements ResultPublisherCheckpoint 
         ResultPublisherCheckpointEntity initial = new ResultPublisherCheckpointEntity();
         initial.setResultChannel(properties.getResultChannel());
         initial.setResultStreamId(properties.getResultStreamId());
-        initial.setRecordingId(0L);
+        initial.setRecordingId(INITIAL_RECORDING_ID);
         initial.setNextReplayPosition(properties.getStartPosition());
         initial.setLastResultSerialNum(0L);
         initial.setLastStartPosition(properties.getStartPosition());

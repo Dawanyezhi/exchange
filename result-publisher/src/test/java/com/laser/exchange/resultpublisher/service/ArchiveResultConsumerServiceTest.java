@@ -2,7 +2,6 @@ package com.laser.exchange.resultpublisher.service;
 
 import com.laser.exchange.resultpublisher.ResultFrameFixtures;
 import com.laser.exchange.resultpublisher.archive.ResultLogEntry;
-import com.laser.exchange.resultpublisher.checkpoint.InMemoryResultPublisherCheckpoint;
 import com.laser.exchange.resultpublisher.checkpoint.ResultPublisherCheckpoint;
 import com.laser.exchange.resultpublisher.config.ResultPublisherProperties;
 import com.laser.exchange.resultpublisher.publish.ResultPublisher;
@@ -69,6 +68,72 @@ class ArchiveResultConsumerServiceTest {
         assertEquals(0L, checkpoint.lastResultSerialNum());
     }
 
+    @Test
+    @DisplayName("checkpoint recording 与最新 recording 一致时使用数据库 position")
+    void usesCheckpointPositionWhenRecordingMatchesLatestRecording() {
+        RecordingCheckpoint checkpoint = new RecordingCheckpoint(new ArrayList<>());
+        checkpoint.recordingId = 7L;
+        checkpoint.nextReplayPosition = 512L;
+        checkpoint.lastResultSerialNum = 5L;
+        ArchiveResultConsumerService service = new ArchiveResultConsumerService(
+                new ResultPublisherProperties(),
+                entry -> {
+                },
+                checkpoint
+        );
+
+        ArchiveResultConsumerService.ReplayRequest request = service.replayRequest(7L);
+
+        assertEquals(7L, request.recordingId());
+        assertEquals(7L, request.checkpointRecordingId());
+        assertEquals(512L, request.position());
+        assertEquals(5L, request.lastResultSerialNum());
+    }
+
+    @Test
+    @DisplayName("checkpoint recording 初始化时从最新 recording 起点回放")
+    void startsFromZeroWhenCheckpointRecordingIsInitial() {
+        RecordingCheckpoint checkpoint = new RecordingCheckpoint(new ArrayList<>());
+        checkpoint.recordingId = -1L;
+        checkpoint.nextReplayPosition = 512L;
+        checkpoint.lastResultSerialNum = 5L;
+        ArchiveResultConsumerService service = new ArchiveResultConsumerService(
+                new ResultPublisherProperties(),
+                entry -> {
+                },
+                checkpoint
+        );
+
+        ArchiveResultConsumerService.ReplayRequest request = service.replayRequest(8L);
+
+        assertEquals(8L, request.recordingId());
+        assertEquals(-1L, request.checkpointRecordingId());
+        assertEquals(0L, request.position());
+        assertEquals(5L, request.lastResultSerialNum());
+    }
+
+    @Test
+    @DisplayName("checkpoint recording 与最新 recording 不一致时从最新 recording 起点回放")
+    void startsFromZeroWhenRecordingChanges() {
+        RecordingCheckpoint checkpoint = new RecordingCheckpoint(new ArrayList<>());
+        checkpoint.recordingId = 7L;
+        checkpoint.nextReplayPosition = 512L;
+        checkpoint.lastResultSerialNum = 5L;
+        ArchiveResultConsumerService service = new ArchiveResultConsumerService(
+                new ResultPublisherProperties(),
+                entry -> {
+                },
+                checkpoint
+        );
+
+        ArchiveResultConsumerService.ReplayRequest request = service.replayRequest(8L);
+
+        assertEquals(8L, request.recordingId());
+        assertEquals(7L, request.checkpointRecordingId());
+        assertEquals(0L, request.position());
+        assertEquals(5L, request.lastResultSerialNum());
+    }
+
     private static ResultLogEntry resultLogEntry(long resultSerialNum, long startPosition, long endPosition) {
         return new ResultLogEntry(
                 resultSerialNum,
@@ -91,7 +156,7 @@ class ArchiveResultConsumerServiceTest {
                     properties,
                     entry -> {
                     },
-                    new InMemoryResultPublisherCheckpoint(properties)
+                    new RecordingCheckpoint(new ArrayList<>())
             );
         }
 
@@ -128,8 +193,15 @@ class ArchiveResultConsumerServiceTest {
 
         private long lastResultSerialNum;
 
+        private long recordingId = -1L;
+
         private RecordingCheckpoint(List<String> events) {
             this.events = events;
+        }
+
+        @Override
+        public long recordingId() {
+            return recordingId;
         }
 
         @Override
@@ -145,6 +217,7 @@ class ArchiveResultConsumerServiceTest {
         @Override
         public void markPublished(ResultLogEntry entry) {
             events.add("checkpoint:" + entry.resultSerialNum());
+            recordingId = entry.recordingId();
             nextReplayPosition = entry.endPosition();
             lastResultSerialNum = entry.resultSerialNum();
         }

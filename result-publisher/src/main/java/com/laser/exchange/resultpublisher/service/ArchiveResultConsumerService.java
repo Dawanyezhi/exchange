@@ -99,19 +99,19 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
                 aeron = connectAeron();
                 archive = connectArchive(aeron);
                 ArchiveResultLogReader reader = new ArchiveResultLogReader(archive, properties.toReaderConfig());
-                ResultLogScanState state = new ResultLogScanState(checkpoint.lastResultSerialNum());
+                long latestRecordingId = reader.findLatestResultRecordingId();
+                ReplayRequest replayRequest = replayRequest(latestRecordingId);
+                ResultLogScanState state = new ResultLogScanState(replayRequest.lastResultSerialNum());
 
-                // 开始replay位置
-                long startPosition = checkpoint.nextReplayPosition();
-
-                log.info("[ArchiveResultConsumerService] following result recording from position={}, lastResultSerialNum={}, channel={}, streamId={}",
-                        startPosition, state.getLastResultSerialNum(), properties.getResultChannel(), properties.getResultStreamId());
+                log.info("[ArchiveResultConsumerService] following result recording, latestRecordingId={}, checkpointRecordingId={}, position={}, lastResultSerialNum={}, channel={}, streamId={}",
+                        replayRequest.recordingId(), replayRequest.checkpointRecordingId(), replayRequest.position(),
+                        state.getLastResultSerialNum(), properties.getResultChannel(), properties.getResultStreamId());
 
                 startupCompleted = true;
                 signalStartupSuccess();
 
                 // 拉取结果
-                reader.followFrom(startPosition, state, this::publishAndCheckpoint, () -> running);
+                reader.followFrom(replayRequest.recordingId(), replayRequest.position(), state, this::publishAndCheckpoint, () -> running);
             } catch (Exception e) {
                 if (running) {
                     if (!startupCompleted && shouldFailStartup(startupDeadlineNs, retryIntervalMs)) {
@@ -157,6 +157,13 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
     void publishAndCheckpoint(ResultLogEntry entry) {
         publisher.publish(entry);
         checkpoint.markPublished(entry);
+    }
+
+    ReplayRequest replayRequest(long latestRecordingId) {
+        long checkpointRecordingId = checkpoint.recordingId();
+        long lastResultSerialNum = checkpoint.lastResultSerialNum();
+        long startPosition = checkpointRecordingId == latestRecordingId ? checkpoint.nextReplayPosition() : 0L;
+        return new ReplayRequest(latestRecordingId, checkpointRecordingId, startPosition, lastResultSerialNum);
     }
 
     private void awaitStartup() {
@@ -212,6 +219,43 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
             Thread.sleep(retryIntervalMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    static final class ReplayRequest {
+
+        private final long recordingId;
+
+        private final long checkpointRecordingId;
+
+        private final long position;
+
+        private final long lastResultSerialNum;
+
+        private ReplayRequest(long recordingId,
+                              long checkpointRecordingId,
+                              long position,
+                              long lastResultSerialNum) {
+            this.recordingId = recordingId;
+            this.checkpointRecordingId = checkpointRecordingId;
+            this.position = position;
+            this.lastResultSerialNum = lastResultSerialNum;
+        }
+
+        long recordingId() {
+            return recordingId;
+        }
+
+        long checkpointRecordingId() {
+            return checkpointRecordingId;
+        }
+
+        long position() {
+            return position;
+        }
+
+        long lastResultSerialNum() {
+            return lastResultSerialNum;
         }
     }
 }

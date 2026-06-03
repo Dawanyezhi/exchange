@@ -4,6 +4,8 @@ import com.laser.exchange.resultpublisher.archive.ResultLogEntry;
 
 public interface ResultPublisherCheckpoint {
 
+    long recordingId();
+
     long nextReplayPosition();
 
     long lastResultSerialNum();
