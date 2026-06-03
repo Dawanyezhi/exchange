@@ -12,8 +12,10 @@ import io.aeron.logbuffer.Header;
 import io.aeron.protocol.DataHeaderFlyweight;
 import org.agrona.BitUtil;
 import org.agrona.DirectBuffer;
+import org.agrona.concurrent.IdleStrategy;
 
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * 从 Aeron Archive result-data-stream 读取 MatchResult。
@@ -46,52 +48,59 @@ public class ArchiveResultLogReader {
         return recordingId;
     }
 
-    public ResultLogScanState replayFrom(long position, ResultLogEntryHandler handler) {
-        return replay(findLatestResultRecordingId(), position, AeronArchive.REPLAY_ALL_AND_STOP, handler);
-    }
-
-    public ResultLogScanState replay(long recordingId,
-                                     long position,
-                                     long length,
-                                     ResultLogEntryHandler handler) {
-        ResultLogScanState state = new ResultLogScanState();
-        replay(recordingId, position, length, new ResultLogScanner(state, handler));
+    public ResultLogScanState followFrom(long position,
+                                         ResultLogScanState state,
+                                         ResultLogEntryHandler handler,
+                                         BooleanSupplier running) {
+        long recordingId = findLatestResultRecordingId();
+        replay(recordingId, position, AeronArchive.REPLAY_ALL_AND_FOLLOW, new ResultLogScanner(state, handler), running);
         return state;
     }
 
     public void replay(long recordingId,
                        long position,
                        long length,
-                       ResultLogScanner scanner) {
+                       ResultLogScanner scanner,
+                       BooleanSupplier running) {
         try (Subscription subscription = archive.replay(
                 recordingId,
                 position,
                 length,
                 config.replayChannel(),
                 config.replayStreamId())) {
+            // 自动解决拆包问题
             FragmentHandler handler = new FragmentAssembler(new DecodingFragmentHandler(recordingId, scanner));
-            pollUntilEndOfReplay(subscription, handler);
+            pollUntilEndOfReplay(subscription, handler, running, length == AeronArchive.REPLAY_ALL_AND_FOLLOW);
         }
     }
 
-    private void pollUntilEndOfReplay(Subscription subscription, FragmentHandler handler) {
+    private void pollUntilEndOfReplay(Subscription subscription,
+                                      FragmentHandler handler,
+                                      BooleanSupplier running,
+                                      boolean follow) {
+        IdleStrategy idleStrategy = config.newIdleStrategy();
+
         int idleSpins = 0;
-        while (true) {
+        while (running.getAsBoolean()) {
             int fragments = subscription.poll(handler, config.fragmentLimit());
             if (fragments > 0) {
                 idleSpins = 0;
-                continue;
             }
 
             if (isReplayComplete(subscription)) {
                 return;
             }
 
-            if (++idleSpins > config.idleSpinLimit()) {
+            if (follow) {
+                idleStrategy.idle(fragments);
+                continue;
+            }
+
+            if (fragments == 0 && ++idleSpins > config.idleSpinLimit()) {
                 throw new ResultLogReaderException("replay made no progress, channel="
                         + config.replayChannel() + ", streamId=" + config.replayStreamId());
             }
-            Thread.onSpinWait();
+            idleStrategy.idle(fragments);
         }
     }
 

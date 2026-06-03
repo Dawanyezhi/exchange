@@ -1,5 +1,11 @@
 package com.laser.exchange.resultpublisher.archive;
 
+import org.agrona.concurrent.BackoffIdleStrategy;
+import org.agrona.concurrent.IdleStrategy;
+
+import java.util.Objects;
+import java.util.function.Supplier;
+
 public final class ArchiveResultLogReaderConfig {
 
     public static final String DEFAULT_RESULT_CHANNEL = "aeron:ipc";
@@ -14,6 +20,14 @@ public final class ArchiveResultLogReaderConfig {
 
     public static final int DEFAULT_IDLE_SPIN_LIMIT = 10_000;
 
+    public static final long DEFAULT_IDLE_MAX_SPINS = BackoffIdleStrategy.DEFAULT_MAX_SPINS;
+
+    public static final long DEFAULT_IDLE_MAX_YIELDS = BackoffIdleStrategy.DEFAULT_MAX_YIELDS;
+
+    public static final long DEFAULT_IDLE_MIN_PARK_NS = BackoffIdleStrategy.DEFAULT_MIN_PARK_PERIOD_NS;
+
+    public static final long DEFAULT_IDLE_MAX_PARK_NS = BackoffIdleStrategy.DEFAULT_MAX_PARK_PERIOD_NS;
+
     private final String resultChannel;
 
     private final int resultStreamId;
@@ -26,12 +40,37 @@ public final class ArchiveResultLogReaderConfig {
 
     private final int idleSpinLimit;
 
+    private final Supplier<IdleStrategy> idleStrategySupplier;
+
     public ArchiveResultLogReaderConfig(String resultChannel,
                                         int resultStreamId,
                                         String replayChannel,
                                         int replayStreamId,
                                         int fragmentLimit,
                                         int idleSpinLimit) {
+        this(
+                resultChannel,
+                resultStreamId,
+                replayChannel,
+                replayStreamId,
+                fragmentLimit,
+                idleSpinLimit,
+                () -> new BackoffIdleStrategy(
+                        DEFAULT_IDLE_MAX_SPINS,
+                        DEFAULT_IDLE_MAX_YIELDS,
+                        DEFAULT_IDLE_MIN_PARK_NS,
+                        DEFAULT_IDLE_MAX_PARK_NS
+                )
+        );
+    }
+
+    public ArchiveResultLogReaderConfig(String resultChannel,
+                                        int resultStreamId,
+                                        String replayChannel,
+                                        int replayStreamId,
+                                        int fragmentLimit,
+                                        int idleSpinLimit,
+                                        Supplier<IdleStrategy> idleStrategySupplier) {
         if (resultChannel == null || resultChannel.isBlank()) {
             throw new IllegalArgumentException("resultChannel must not be blank");
         }
@@ -50,6 +89,7 @@ public final class ArchiveResultLogReaderConfig {
         this.replayStreamId = replayStreamId;
         this.fragmentLimit = fragmentLimit;
         this.idleSpinLimit = idleSpinLimit;
+        this.idleStrategySupplier = Objects.requireNonNull(idleStrategySupplier, "idleStrategySupplier");
     }
 
     public static ArchiveResultLogReaderConfig defaults() {
@@ -85,5 +125,9 @@ public final class ArchiveResultLogReaderConfig {
 
     public int idleSpinLimit() {
         return idleSpinLimit;
+    }
+
+    IdleStrategy newIdleStrategy() {
+        return idleStrategySupplier.get();
     }
 }
