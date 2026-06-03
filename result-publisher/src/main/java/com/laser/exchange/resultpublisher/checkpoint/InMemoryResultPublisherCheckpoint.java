@@ -2,9 +2,7 @@ package com.laser.exchange.resultpublisher.checkpoint;
 
 import com.laser.exchange.resultpublisher.archive.ResultLogEntry;
 import com.laser.exchange.resultpublisher.config.ResultPublisherProperties;
-import org.springframework.stereotype.Component;
 
-@Component
 public class InMemoryResultPublisherCheckpoint implements ResultPublisherCheckpoint {
 
     private long nextReplayPosition;
@@ -26,7 +24,7 @@ public class InMemoryResultPublisherCheckpoint implements ResultPublisherCheckpo
     }
 
     @Override
-    public synchronized void markPublishedInMemory(ResultLogEntry entry) {
+    public synchronized void markPublished(ResultLogEntry entry) {
         nextReplayPosition = entry.endPosition();
         lastResultSerialNum = entry.resultSerialNum();
     }

@@ -8,5 +8,5 @@ public interface ResultPublisherCheckpoint {
 
     long lastResultSerialNum();
 
-    void markPublishedInMemory(ResultLogEntry entry);
+    void markPublished(ResultLogEntry entry);
 }

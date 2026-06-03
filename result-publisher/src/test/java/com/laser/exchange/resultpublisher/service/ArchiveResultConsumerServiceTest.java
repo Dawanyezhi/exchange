@@ -35,8 +35,8 @@ class ArchiveResultConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("撮合结果推送成功后推进内存 checkpoint")
-    void advancesInMemoryCheckpointAfterPublishSucceeds() {
+    @DisplayName("撮合结果推送成功后推进 checkpoint")
+    void advancesCheckpointAfterPublishSucceeds() {
         ResultPublisherProperties properties = new ResultPublisherProperties();
         List<String> events = new ArrayList<>();
         RecordingPublisher publisher = new RecordingPublisher(events);
@@ -52,8 +52,8 @@ class ArchiveResultConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("撮合结果推送失败时不推进内存 checkpoint")
-    void doesNotAdvanceInMemoryCheckpointWhenPublishFails() {
+    @DisplayName("撮合结果推送失败时不推进 checkpoint")
+    void doesNotAdvanceCheckpointWhenPublishFails() {
         ResultPublisherProperties properties = new ResultPublisherProperties();
         List<String> events = new ArrayList<>();
         RecordingPublisher publisher = new RecordingPublisher(events);
@@ -143,7 +143,7 @@ class ArchiveResultConsumerServiceTest {
         }
 
         @Override
-        public void markPublishedInMemory(ResultLogEntry entry) {
+        public void markPublished(ResultLogEntry entry) {
             events.add("checkpoint:" + entry.resultSerialNum());
             nextReplayPosition = entry.endPosition();
             lastResultSerialNum = entry.resultSerialNum();

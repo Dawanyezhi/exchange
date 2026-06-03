@@ -97,6 +97,8 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
                 archive = connectArchive(aeron);
                 ArchiveResultLogReader reader = new ArchiveResultLogReader(archive, properties.toReaderConfig());
                 ResultLogScanState state = new ResultLogScanState(checkpoint.lastResultSerialNum());
+
+                // 开始replay位置
                 long startPosition = checkpoint.nextReplayPosition();
 
                 log.info("[ArchiveResultConsumerService] following result recording from position={}, lastResultSerialNum={}, channel={}, streamId={}",
@@ -151,7 +153,7 @@ public class ArchiveResultConsumerService implements SmartLifecycle {
 
     void publishAndCheckpoint(ResultLogEntry entry) {
         publisher.publish(entry);
-        checkpoint.markPublishedInMemory(entry);
+        checkpoint.markPublished(entry);
     }
 
     private void awaitStartup() {
